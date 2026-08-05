@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 결과·로그·사용자 파일
+out/
+logs/
+spike_out/
+user_favorites.json
+*.hwp
+*.pdf
+*.png
+
+# IDE / OS
+.idea/
+.vscode/
+.cursor/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 임시
+*.tmp
+*.bak
