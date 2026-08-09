@@ -15,6 +15,7 @@
 import html
 import re
 import xml.etree.ElementTree as ElementTree
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -292,6 +293,71 @@ def list_all_versions(law: LawSearchResult) -> list[LawVersion]:
 
     화면에서 '연혁' 을 눌렀을 때 뜨는 목록과 같은 내용이다.
     예를 들어 하자판정기준은 2014년부터 2026년까지 7개 판이 나온다.
+
+    조문마다 시행일이 다른 개정본은 문서 하나당 '가장 이른 시행일' 을 대표로 둔다.
+    (목록 정렬·전체 기간 나열용). 어느 줄에 '(현행)' 을 붙일지와
+    특정 시점 고르기는 조문별 시행일 전체를 본다.
+    """
+    versions, dates_by_version_id = _load_history_with_all_dates(law)
+    return _mark_which_version_is_currently_in_effect(versions, dates_by_version_id)
+
+
+def _effective_date_on_or_before(
+    dates: set[date], reference_date: date
+) -> date | None:
+    """
+    기준일 이하인 시행일 중 가장 늦은 날을 고른다.
+
+    조문마다 시행일이 다른 개정본에서
+    '그 시점에 이미 시작된 시행일 중 가장 최근 것' 을 고를 때 쓴다.
+    기준일보다 늦은 날만 있으면 None (그 시점에는 아직 이 문서가 안 살아 있음).
+    """
+    already_started = [moment for moment in dates if moment <= reference_date]
+    if not already_started:
+        return None
+    return max(already_started)
+
+
+def _pick_version_for_reference_date(
+    versions: list[LawVersion],
+    dates_by_version_id: dict[str, set[date]],
+    reference_date: date,
+) -> LawVersion | None:
+    """
+    기준일 시점에 시행 중이던 판 하나를 고른다.
+
+    각 문서의 조문별 시행일 중 기준일 이하인 날들의 최댓값을 비교해
+    그 값이 가장 큰 문서를 고른다. 이른 대표일만 보면
+    (예: 236977→2022-12-01, 247269→2023-07-04) 검색의 2024-12-01 판을 놓친다.
+    """
+    best_version: LawVersion | None = None
+    best_date: date | None = None
+
+    for version in versions:
+        candidate_date = _effective_date_on_or_before(
+            dates_by_version_id.get(version.version_id, set()),
+            reference_date,
+        )
+        if candidate_date is None:
+            continue
+        if best_date is None or candidate_date > best_date:
+            best_date = candidate_date
+            best_version = version
+
+    if best_version is None or best_date is None:
+        return None
+
+    return _copy_version_with_effective_date(best_version, best_date)
+
+
+def _load_history_with_all_dates(
+    law: LawSearchResult,
+) -> tuple[list[LawVersion], dict[str, set[date]]]:
+    """
+    연혁을 읽어 (대표 개정본 목록, 문서번호별 모든 시행일) 을 함께 돌려준다.
+
+    대표 목록: 같은 문서번호는 가장 이른 시행일 하나만 (PDF·특정 시점용).
+    시행일 집합: 조문별·검색 API 날짜까지 모은 것 (기간 필터용).
     """
     adapter = config.LAW_SITE_ADAPTERS[law.source_kind]
 
@@ -302,13 +368,36 @@ def list_all_versions(law: LawSearchResult) -> list[LawVersion]:
 
     history_html = law_site.request_data(adapter["history_path"], form_values)
 
-    versions = _parse_history_entries(history_html, law)
-    if not versions:
+    raw_versions = _parse_history_entries(history_html, law)
+    if not raw_versions:
         # 이력을 못 읽으면 최소한 검색으로 찾은 현재 판이라도 쓸 수 있게 한다.
-        versions = [_version_from_search_result(law)]
+        raw_versions = [_version_from_search_result(law)]
 
-    versions.sort(key=lambda version: version.effective_date)
-    return _mark_which_version_is_currently_in_effect(_remove_duplicate_versions(versions))
+    dates_by_version_id = _collect_effective_dates_by_version_id(raw_versions, law)
+    unique_versions = _remove_duplicate_versions(raw_versions)
+    unique_versions.sort(key=lambda version: version.effective_date)
+    return unique_versions, dates_by_version_id
+
+
+def _collect_effective_dates_by_version_id(
+    raw_versions: list[LawVersion],
+    law: LawSearchResult,
+) -> dict[str, set[date]]:
+    """
+    문서번호마다 연혁에 나온 시행일을 모두 모은다.
+
+    검색 API 가 알려 준 '현재 판' 시행일도 같은 문서번호에 합친다.
+    연혁에는 이른 날(예: 2022-12-01)만 있고 API 에는 늦은 날(2024-12-01)만
+    보이는 경우가 있어서, 기간 찾기에서 늦은 날이 빠지지 않게 하기 위함이다.
+    """
+    dates_by_version_id: dict[str, set[date]] = defaultdict(set)
+    for version in raw_versions:
+        dates_by_version_id[version.version_id].add(version.effective_date)
+
+    if law.version_id:
+        dates_by_version_id[law.version_id].add(law.effective_date)
+
+    return dates_by_version_id
 
 
 def _remove_duplicate_versions(versions_oldest_first: list[LawVersion]) -> list[LawVersion]:
@@ -321,11 +410,18 @@ def _remove_duplicate_versions(versions_oldest_first: list[LawVersion]) -> list[
 
     우리에게는 같은 문서이므로 그대로 두면 똑같은 PDF 를 여러 번 받아
     서면에 같은 그림이 중복으로 들어간다. 가장 이른 시행일 하나만 남긴다.
+
+    주의: 이 '이른 날' 만으로 기간 필터를 걸면, 늦은 조문 시행일
+    (예: 2024-12-01)이 기간 안에 있어도 개정본이 없다고 나온다.
+    기간 찾기는 find_versions_effective_between 이 모든 시행일을 본다.
     """
+    # 이른 날을 남기려면 시행일 오름차순으로 먼저 본 것을 채택해야 한다.
+    ordered = sorted(versions_oldest_first, key=lambda version: version.effective_date)
+
     seen_version_ids: set[str] = set()
     unique_versions: list[LawVersion] = []
 
-    for version in versions_oldest_first:
+    for version in ordered:
         if version.version_id in seen_version_ids:
             continue
         seen_version_ids.add(version.version_id)
@@ -342,6 +438,20 @@ def _version_from_search_result(law: LawSearchResult) -> LawVersion:
         effective_date=law.effective_date,
         promulgation_label=law.promulgation_label,
         is_currently_in_effect=True,
+    )
+
+
+def _copy_version_with_effective_date(
+    version: LawVersion, effective_date: date
+) -> LawVersion:
+    """같은 문서인데 표시·다운로드용 시행일만 바꿔 새 상자를 만든다."""
+    return LawVersion(
+        source_kind=version.source_kind,
+        version_id=version.version_id,
+        law_name=version.law_name,
+        effective_date=effective_date,
+        promulgation_label=version.promulgation_label,
+        is_currently_in_effect=version.is_currently_in_effect,
     )
 
 
@@ -390,19 +500,22 @@ def _parse_history_entries(history_html: str, law: LawSearchResult) -> list[LawV
 
 def _mark_which_version_is_currently_in_effect(
     versions_oldest_first: list[LawVersion],
+    dates_by_version_id: dict[str, set[date]],
 ) -> list[LawVersion]:
     """
     지금 살아있는 판이 어느 것인지 표시한다.
 
-    '가장 나중에 만들어진 판' 이 아니라 '오늘 기준으로 이미 시행된 판 중 가장 최근 것' 이다.
-    아직 시행일이 오지 않은 개정본(시행예정)이 목록에 함께 들어있기 때문에 구분이 필요하다.
+    '가장 나중에 만들어진 판' 이 아니라
+    '오늘 기준으로 이미 시작된 시행일 중 가장 최근인 문서' 이다.
+    조문별 시행일이 있으면 이른 대표일만 보지 않고 전체 시행일을 본다.
+    (안 그러면 소방시설법처럼 2024-12-01 판을 두고 2023-07-04 를 현행으로 찍는다)
     """
     today = date.today()
-    already_in_effect = [v for v in versions_oldest_first if v.effective_date <= today]
-    if not already_in_effect:
-        return versions_oldest_first
+    current = _pick_version_for_reference_date(
+        versions_oldest_first, dates_by_version_id, today
+    )
+    current_version_id = current.version_id if current is not None else None
 
-    current_version_id = already_in_effect[-1].version_id
     return [
         LawVersion(
             source_kind=version.source_kind,
@@ -410,7 +523,10 @@ def _mark_which_version_is_currently_in_effect(
             law_name=version.law_name,
             effective_date=version.effective_date,
             promulgation_label=version.promulgation_label,
-            is_currently_in_effect=(version.version_id == current_version_id),
+            is_currently_in_effect=(
+                current_version_id is not None
+                and version.version_id == current_version_id
+            ),
         )
         for version in versions_oldest_first
     ]
@@ -420,20 +536,33 @@ def find_version_effective_on(law: LawSearchResult, reference_date: date) -> Law
     """
     특정 시점에 시행 중이던 판 하나를 골라낸다.
 
-    고르는 기준은 '그 날짜보다 늦지 않게 시행된 판들 중 가장 최근 것' 이다.
-    예를 들어 2025년 6월 1일을 기준으로 하면 2025. 2. 3. 시행판이 답이 된다
-    (그 다음 개정은 2026년이라 그 시점에는 아직 시행 전이므로).
+    고르는 기준은 '그 날짜보다 늦지 않게 시작된 시행일들 중 가장 최근인 문서' 이다.
+    조문마다 시행일이 다른 개정본은 모든 시행일을 본다.
+    예를 들어 소방시설법은 같은 문서에 2022-12-01 과 2024-12-01 이 있는데,
+    2026년 기준으로는 2024-12-01 쪽이 맞다 (이른 날만 보면 엉뚱한 판이 고른다).
     """
-    already_in_effect = [
-        version
-        for version in list_all_versions(law)
-        if version.effective_date <= reference_date
-    ]
-
-    if not already_in_effect:
+    versions, dates_by_version_id = _load_history_with_all_dates(law)
+    picked = _pick_version_for_reference_date(
+        versions, dates_by_version_id, reference_date
+    )
+    if picked is None:
         raise LawVersionNotFoundError(law.law_name, reference_date)
 
-    return already_in_effect[-1]  # 오래된 순으로 정렬돼 있으므로 마지막이 가장 최근
+    # 현행 표시는 '오늘' 기준. 과거 시점을 골라도 목록·캡션에서 구분할 수 있게.
+    current_today = _pick_version_for_reference_date(
+        versions, dates_by_version_id, date.today()
+    )
+    is_current = (
+        current_today is not None and picked.version_id == current_today.version_id
+    )
+    return LawVersion(
+        source_kind=picked.source_kind,
+        version_id=picked.version_id,
+        law_name=picked.law_name,
+        effective_date=picked.effective_date,
+        promulgation_label=picked.promulgation_label,
+        is_currently_in_effect=is_current,
+    )
 
 
 def find_versions_effective_between(
@@ -444,12 +573,34 @@ def find_versions_effective_between(
 
     "2024년부터 2026년 사이에 이 조문이 어떻게 바뀌었나" 를
     서면에 나란히 보여줄 때 쓴다.
+
+    조문마다 시행일이 다른 개정본은, 그 문서의 시행일 중 하나라도
+    기간 안에 들어가면 포함한다. (대표일로 쓴 '가장 이른 날'만 보면
+    늦은 조문 시행일이 기간에 있어도 빠지는 버그가 난다)
+
+    포함될 때 effective_date 는 기간 안에 드는 날 중 가장 늦은 날로 둔다.
+    검색에 보이는 날짜·캡션·법령 PDF 의 efYd 와 맞추기 위해서다.
     """
-    within_period = [
-        version
-        for version in list_all_versions(law)
-        if period.contains(version.effective_date)
-    ]
+    unique_versions, dates_by_version_id = _load_history_with_all_dates(law)
+    marked_versions = _mark_which_version_is_currently_in_effect(
+        unique_versions, dates_by_version_id
+    )
+
+    within_period: list[LawVersion] = []
+    for version in marked_versions:
+        dates_in_period = [
+            moment
+            for moment in dates_by_version_id.get(version.version_id, set())
+            if period.contains(moment)
+        ]
+        if not dates_in_period:
+            continue
+        # 기간 안 늦은 날을 쓰면 검색 [시행 2024-12-01] 과 캡션이 맞는다.
+        within_period.append(
+            _copy_version_with_effective_date(version, max(dates_in_period))
+        )
+
+    within_period.sort(key=lambda item: item.effective_date)
 
     if not within_period:
         raise NoVersionInPeriodError(law.law_name, period.start, period.end)

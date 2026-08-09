@@ -3,14 +3,9 @@
 
 확장자가 .pyw 인 이유: 검은 명령창 없이 프로그램 창만 뜨게 하기 위해서다.
 (.py 로 두면 뒤에 검은 창이 하나 같이 뜬다)
+
+실행.bat 은 한글 파일명 문제를 피하려고 run.pyw 를 호출한다.
 """
-import sys
-from pathlib import Path
+from launch import launch
 
-# 이 파일이 있는 폴더를 기준으로 나머지 코드를 찾도록 한다.
-# 바탕화면 어디에 두고 더블클릭해도 동작하게 하기 위한 것이다.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from main import main
-
-main()
+launch()

@@ -78,6 +78,7 @@ class InputView(ttk.Frame):
             self._right_column,
             on_phrase_selected=self.add_underline_phrase,
             on_open_original=self._open_original_in_browser,
+            on_phrase_removed=self._remove_underline_phrase_by_text,
         )
 
         self._build_law_search_row()
@@ -176,8 +177,10 @@ class InputView(ttk.Frame):
         self._date_row.grid(row=1, column=0, sticky="ew")
 
         this_year = date.today().year
+        # 기본은 오늘. 사건 시점을 보려면 사용자가 날짜를 바꾸면 된다.
+        # (예전 {올해}-06-01 기본값은 지금이 아닌 날짜로 헷갈리게 했다)
         self._reference_date_entry = ttk.Entry(self._date_row, width=12)
-        self._reference_date_entry.insert(0, f"{this_year}-06-01")
+        self._reference_date_entry.insert(0, date.today().isoformat())
 
         self._period_start_entry = ttk.Entry(self._date_row, width=12)
         self._period_start_entry.insert(0, f"{this_year - 2}-01-01")
@@ -862,11 +865,26 @@ class InputView(ttk.Frame):
     def _remove_underline_phrase_at(self, index: int) -> None:
         """
         지정한 위치의 밑줄 문구 칩을 삭제한다.
+
+        미리보기 빨간 표시도 같은 문구만큼 지워 양쪽이 어긋나지 않게 한다.
         """
         if not (0 <= index < len(self._underline_phrases)):
             return
+        phrase = self._underline_phrases[index]
         del self._underline_phrases[index]
         self._render_underline_phrase_chips()
+        self._preview_view.remove_selected_phrase(phrase)
+
+    def _remove_underline_phrase_by_text(self, phrase: str) -> None:
+        """
+        미리보기에서 빨간 표시를 클릭해 지웠을 때 칩 목록을 맞춘다.
+
+        미리보기 쪽 표시는 이미 지워진 상태이므로 remove_selected_phrase 는 부르지 않는다.
+        """
+        cleaned = phrase.strip()
+        if cleaned in self._underline_phrases:
+            self._underline_phrases.remove(cleaned)
+            self._render_underline_phrase_chips()
 
     def _render_underline_phrase_chips(self) -> None:
         """

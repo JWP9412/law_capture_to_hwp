@@ -204,6 +204,17 @@ all_passed &= report("밑줄 초기화가 칩 목록을 비우는가", len(view.
 
 print("\n=== 3-5. Ctrl+F 찾기 ===")
 preview = view.preview_view
+all_passed &= report(
+    "헤더에 찾기 버튼이 있는가",
+    preview._find_button.cget("text") == "찾기",
+    preview._find_button.cget("text"),
+)
+preview._find_button.invoke()
+window.update()
+all_passed &= report("찾기 버튼으로 막대가 열리는가", preview._is_find_bar_visible)
+preview._hide_find_bar()
+window.update()
+
 preview._show_find_bar()
 window.update()
 all_passed &= report("찾기 막대가 보이는가", preview._is_find_bar_visible)
@@ -238,6 +249,58 @@ all_passed &= report(
 preview._hide_find_bar()
 window.update()
 all_passed &= report("닫으면 막대가 숨겨지는가", not preview._is_find_bar_visible)
+
+print("\n=== 3-5b. 빨간 표시 클릭으로 밑줄 취소 ===")
+preview.show_article("제7조", sample_article)
+window.update()
+# 드래그 선택과 같은 경로: 구간을 표시하고 칩에 넣는다.
+start = preview._text_box.search("시공하자로 본다", "1.0")
+end = f"{start}+{len('시공하자로 본다')}c"
+preview._text_box.tag_add("sel", start, end)
+preview._text_box.mark_set("insert", end)
+preview._on_drag_finished()
+window.update()
+all_passed &= report(
+    "드래그 후 추적 구간이 생겼는가",
+    len(preview._selected_phrase_ranges) == 1,
+    str(preview._selected_phrase_ranges),
+)
+all_passed &= report(
+    "칩에도 문구가 들어갔는가",
+    "시공하자로 본다" in view._underline_phrases,
+    str(view._underline_phrases),
+)
+removed = preview._try_remove_phrase_at(start)
+window.update()
+all_passed &= report("빨간 구간 클릭 삭제가 되는가", removed)
+all_passed &= report(
+    "미리보기 추적이 비었는가",
+    len(preview._selected_phrase_ranges) == 0,
+)
+all_passed &= report(
+    "칩에서도 빠졌는가",
+    "시공하자로 본다" not in view._underline_phrases,
+    str(view._underline_phrases),
+)
+
+# 칩 X → 미리보기 표시도 사라지는지
+preview._text_box.tag_add("sel", start, end)
+preview._on_drag_finished()
+window.update()
+all_passed &= report("다시 드래그해 칩이 생겼는가", "시공하자로 본다" in view._underline_phrases)
+chip_index = view._underline_phrases.index("시공하자로 본다")
+view._remove_underline_phrase_at(chip_index)
+window.update()
+all_passed &= report(
+    "칩 삭제 후 미리보기 표시도 사라지는가",
+    len(preview._selected_phrase_ranges) == 0,
+    str(preview._selected_phrase_ranges),
+)
+all_passed &= report(
+    "안내 문구에 클릭 취소가 있는가",
+    "빨간 표시를 클릭하면" in preview._guide_label.cget("text"),
+    preview._guide_label.cget("text"),
+)
 
 print("\n=== 3-6. 드래그 순번 표기 ===")
 # 같은 문구가 두 번 나오는 본문에서 두 번째를 고르면 '[2번째]' 가 붙어야 한다.

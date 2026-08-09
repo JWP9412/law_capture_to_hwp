@@ -35,11 +35,13 @@ GUIDE_BEFORE_LOADING = (
 GUIDE_WHILE_LOADING = "조문을 불러오는 중입니다…"
 GUIDE_AFTER_LOADING = (
     "밑줄 칠 부분을 마우스로 드래그하세요. 여러 번 고를 수 있습니다. "
-    "(Ctrl+F 로 찾기)"
+    "(찾기 또는 Ctrl+F) "
+    "빨간 표시를 클릭하면 그 밑줄을 취소합니다."
 )
 GUIDE_AFTER_FULL_LOADING = (
     "전체보기입니다. 드래그하면 밑줄 문구와 조문 번호가 함께 채워집니다. "
-    "(본문 글자만 표시 · Ctrl+F 로 찾기 · 표·별표는 [원문 보기])"
+    "(본문 글자만 표시 · 찾기 또는 Ctrl+F · 표·별표는 [원문 보기]) "
+    "빨간 표시를 클릭하면 그 밑줄을 취소합니다."
 )
 
 
@@ -51,10 +53,13 @@ class PreviewView(ttk.LabelFrame):
         parent,
         on_phrase_selected: Callable[[str, ArticleNumber | None], None],
         on_open_original: Callable[[], None],
+        on_phrase_removed: Callable[[str], None] | None = None,
     ):
         super().__init__(parent, text="조문 미리보기", padding=6)
         self._on_phrase_selected = on_phrase_selected
         self._on_open_original = on_open_original
+        # 빨간 표시를 클릭해 지울 때 왼쪽 칩 목록도 같이 빼기 위한 알림.
+        self._on_phrase_removed = on_phrase_removed
         self._shown_versions: list[LawVersion] = []
         # 전체보기일 때만 드래그로 조문 번호를 자동 채운다.
         self._is_full_view_mode = False
@@ -63,6 +68,12 @@ class PreviewView(ttk.LabelFrame):
         self._found_ranges: list[tuple[str, str]] = []
         self._current_found_index = -1
         self._is_find_bar_visible = False
+
+        # 드래그로 고른 밑줄. (시작, 끝, 칩에 넣은 문구 라벨)
+        # 빨간 표시 클릭 삭제·칩 X 동기화에 쓴다.
+        self._selected_phrase_ranges: list[tuple[str, str, str]] = []
+        # 클릭과 드래그를 구분한다. 버튼 누른 자리와 뗀 자리가 거의 같으면 클릭.
+        self._pointer_press_index: str | None = None
 
         self._build_header_row()
         self._build_find_bar()
@@ -85,9 +96,15 @@ class PreviewView(ttk.LabelFrame):
         self._article_label = ttk.Label(row, text="", foreground="gray")
         self._article_label.pack(side="left", padx=6)
 
+        # side=right 는 먼저 pack 한 것이 더 오른쪽에 온다.
+        # 원문 보기를 먼저, 찾기를 나중에 넣으면 화면은 [찾기][원문 보기].
         ttk.Button(
             row, text="원문 보기", command=self._on_open_original
         ).pack(side="right")
+        self._find_button = ttk.Button(
+            row, text="찾기", command=self._show_find_bar
+        )
+        self._find_button.pack(side="right", padx=(0, 4))
 
     def _build_find_bar(self) -> None:
         """
@@ -151,7 +168,9 @@ class PreviewView(ttk.LabelFrame):
         self._text_box.tag_configure(
             CURRENT_FOUND_TAG, background=CURRENT_FOUND_BACKGROUND
         )
-        self._text_box.bind("<ButtonRelease-1>", self._on_drag_finished)
+        # 누른 위치와 뗀 위치로 클릭(밑줄 취소) / 드래그(밑줄 추가)를 나눈다.
+        self._text_box.bind("<ButtonPress-1>", self._on_pointer_pressed)
+        self._text_box.bind("<ButtonRelease-1>", self._on_pointer_released)
         self._text_box.bind("<Key>", self._block_typing)
         # 미리보기 안에서도, 창 전체에서도 Ctrl+F 가 통하게 한다.
         self._text_box.bind("<Control-f>", self._show_find_bar)
@@ -230,9 +249,26 @@ class PreviewView(ttk.LabelFrame):
         """
         드래그로 고른 밑줄 표시만 지운다.
 
-        본문 텍스트 자체는 유지하고, 선택 하이라이트 태그만 제거한다.
+        본문 텍스트 자체는 유지하고, 선택 하이라이트 태그와 추적 목록만 비운다.
+        (왼쪽 '밑줄 초기화' 에서 부른다. 칩은 이미 비운 뒤라 콜백은 안 보낸다.)
         """
         self._text_box.tag_remove(SELECTED_PHRASE_TAG, "1.0", tk.END)
+        self._selected_phrase_ranges.clear()
+
+    def remove_selected_phrase(self, phrase: str) -> None:
+        """
+        왼쪽 칩의 삭제로 미리보기 빨간 표시를 맞출 때 쓴다.
+
+        같은 문구가 여러 구간이면 모두 지운다. (칩은 문구 단위로 하나씩이므로)
+        칩 쪽에서 이미 목록을 지웠으므로 on_phrase_removed 는 다시 부르지 않는다.
+        """
+        remaining: list[tuple[str, str, str]] = []
+        for start, end, label in self._selected_phrase_ranges:
+            if label == phrase:
+                self._text_box.tag_remove(SELECTED_PHRASE_TAG, start, end)
+            else:
+                remaining.append((start, end, label))
+        self._selected_phrase_ranges = remaining
 
     def reset_view(self) -> None:
         """
@@ -356,6 +392,50 @@ class PreviewView(ttk.LabelFrame):
     # 사용자 조작에 대한 반응
     # ------------------------------------------------------------------
 
+    def _on_pointer_pressed(self, event) -> None:
+        """마우스 버튼을 누른 글자 위치를 기억한다. 나중에 클릭인지 드래그인지 가른다."""
+        self._pointer_press_index = self._text_box.index(f"@{event.x},{event.y}")
+
+    def _on_pointer_released(self, event) -> None:
+        """
+        손을 떼면: 짧은 클릭이면 빨간 밑줄 취소, 드래그면 밑줄 추가.
+
+        클릭과 드래그를 한 이벤트에서 나누는 이유:
+        둘 다 ButtonRelease 에서 끝나므로, 누른 자리와 뗀 자리가
+        거의 같으면 클릭으로 본다.
+        """
+        release_index = self._text_box.index(f"@{event.x},{event.y}")
+        press_index = self._pointer_press_index
+        self._pointer_press_index = None
+
+        if press_index is not None and self._text_box.compare(
+            press_index, "==", release_index
+        ):
+            if self._try_remove_phrase_at(release_index):
+                return
+
+        self._on_drag_finished()
+
+    def _try_remove_phrase_at(self, text_index: str) -> bool:
+        """
+        클릭한 자리가 빨간 표시 안이면 그 밑줄만 지우고 True.
+
+        왼쪽 칩에도 같은 문구를 빼 달라고 on_phrase_removed 를 부른다.
+        """
+        for index, (start, end, phrase) in enumerate(self._selected_phrase_ranges):
+            # start <= 클릭 < end 이면 이 구간이다.
+            if self._text_box.compare(text_index, "<", start):
+                continue
+            if self._text_box.compare(text_index, ">=", end):
+                continue
+
+            self._text_box.tag_remove(SELECTED_PHRASE_TAG, start, end)
+            del self._selected_phrase_ranges[index]
+            if self._on_phrase_removed is not None:
+                self._on_phrase_removed(phrase)
+            return True
+        return False
+
     def _on_drag_finished(self, _event=None) -> None:
         """
         드래그를 뗀 순간 고른 글자를 밑줄 목록에 넘긴다.
@@ -369,11 +449,15 @@ class PreviewView(ttk.LabelFrame):
 
         try:
             selection_start = self._text_box.index("sel.first")
+            selection_end = self._text_box.index("sel.last")
         except tk.TclError:
             return
 
-        self._text_box.tag_add(SELECTED_PHRASE_TAG, "sel.first", "sel.last")
+        self._text_box.tag_add(SELECTED_PHRASE_TAG, selection_start, selection_end)
         phrase = self._label_with_occurrence(selected, selection_start)
+        self._selected_phrase_ranges.append(
+            (selection_start, selection_end, phrase)
+        )
 
         detected_article: ArticleNumber | None = None
         if self._is_full_view_mode:
@@ -436,6 +520,7 @@ class PreviewView(ttk.LabelFrame):
 
     def _replace_text(self, text: str) -> None:
         self._clear_find_highlights()
+        self._selected_phrase_ranges.clear()
         self._text_box.delete("1.0", tk.END)
         if text:
             self._text_box.insert("1.0", text)
