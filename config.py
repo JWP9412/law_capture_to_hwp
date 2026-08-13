@@ -150,6 +150,19 @@ CAPTION_NUMBER_CLOSING = "] "
 CAPTION_PAGE_MARKER = " ({page_number}/{total_pages})"
 SAME_AS_PREVIOUS_VERSION_SUFFIX = " (앞 개정안과 동일)"
 
+# 앞 개정안과 완전히 같지는 않지만 거의 같을 때 붙이는 말.
+#
+# 왜 '같다/다르다' 만으로 부족한가:
+#   글자 하나만 달라도 '다름' 으로 나온다. 그런데 이름만 바뀌고 조문 내용은
+#   그대로인 개정, 문구를 조금만 다듬은 개정이 흔하다. 그런 경우
+#   아무 표시가 없으면 서면을 읽는 사람이 똑같아 보이는 그림 두 장을 놓고
+#   무엇이 달라졌는지 한참 찾게 된다.
+SIMILAR_TO_PREVIOUS_VERSION_SUFFIX = " (앞 개정안과 {percent}% 유사)"
+
+# 이 값 이상으로 닮았을 때만 '유사' 라고 알린다.
+# 절반쯤 닮은 것까지 알리면 오히려 방해가 되므로 꽤 높게 잡는다.
+SIMILARITY_NOTICE_THRESHOLD = 0.90
+
 # 기존 문서에 넣을 때 찾을 표시. 예: [[법령그림:하자판정기준@2025-02-03#제1조]]
 PLACEHOLDER_PATTERN = "[[법령그림:{law_name}@{effective_date}#{article_label}]]"
 

@@ -29,6 +29,7 @@ from core.law_source import (
     find_versions_effective_between,
     list_all_versions,
     search_laws,
+    was_found_by_former_name,
 )
 from core.models import ArticleCaptureJob, CaptureRunResult, LawVersion
 from core.pipeline import WorkStage
@@ -111,6 +112,14 @@ class LawCaptureController:
     def search_laws_by_name(self, query: str) -> list[LawSearchResult]:
         """이름 일부로 법령·고시를 찾는다."""
         return search_laws(query)
+
+    def was_searched_by_former_name(self, query: str, found_law_name: str) -> bool:
+        """
+        찾아낸 법령이 '지금은 안 쓰는 옛 이름' 으로 걸린 것인지 알려준다.
+
+        화면이 '그 이름은 옛 이름입니다' 안내를 띄울지 정하는 데 쓴다.
+        """
+        return was_found_by_former_name(query, found_law_name)
 
     def list_versions(self, law: LawSearchResult) -> list[LawVersion]:
         """개정 이력 전체를 시행일 오래된 순으로 가져온다."""

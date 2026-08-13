@@ -7,6 +7,7 @@
 화면에 보이는 항목과 이름을 최대한 맞춰 두었다.
 예를 들어 화면에서 '담은 목록'의 한 줄이 곧 ArticleCaptureJob 하나다.
 """
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -14,6 +15,13 @@ from pathlib import Path
 import config
 from config import InsertionMode, LawSourceKind
 from core.article_number import ArticleNumber, build_article_range_label
+
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+
+
+def _without_spaces(text: str) -> str:
+    """이름을 견줄 때 띄어쓰기 차이를 무시하려고 쓴다."""
+    return _WHITESPACE_PATTERN.sub("", text)
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,47 @@ class LawVersion:
     effective_date: date  # 시행일
     promulgation_label: str  # 예: "국토교통부고시 제2025-58호, 2025. 2. 3., 일부개정"
     is_currently_in_effect: bool  # 지금 살아있는 판인지
+
+    # 이 판이 시행되던 당시의 이름. 지금 이름과 다를 수 있다.
+    #
+    # 위의 law_name 은 '검색한 시점의 현행 이름' 이라 옛 판에도 현재 이름이 붙는다.
+    # 그런데 법령·고시는 이름이 바뀌는 일이 드물지 않다.
+    #   - 「주택법」은 1973년에 「주택건설촉진법」이었다
+    #   - 「자동차압급기댐퍼의 성능인증 및 제품검사의 기술기준」은
+    #     2009년에 「자동차압·과압조절형댐퍼의 성능시험기술기준」이었다
+    # 그대로 캡션에 쓰면 그림 속 문서 제목과 캡션이 서로 다른 이름이 되어
+    # 서면에 실제와 다른 이름을 인용하게 된다.
+    #
+    # 연혁을 읽을 때 함께 채워진다. 못 읽었으면 비어 있다.
+    historical_law_name: str = ""
+
+    @property
+    def display_law_name(self) -> str:
+        """
+        캡션과 화면에 쓸 이름.
+
+        당시 이름을 알면 그것을 쓰고, 모르면 지금 이름을 쓴다.
+        (연혁을 못 읽었거나 검색 결과만 가지고 만든 판인 경우)
+        """
+        return self.historical_law_name or self.law_name
+
+    @property
+    def has_different_name_now(self) -> bool:
+        """
+        이 판이 시행되던 당시의 이름이 지금 이름과 '실제로' 다른가.
+
+        띄어쓰기 차이는 다른 이름으로 치지 않는다. 옛 법령은 이름을 붙여 쓰는
+        표기법을 썼기 때문이다. 예를 들어 「주택건설기준 등에 관한 규정」은
+        옛 판에 「주택건설기준등에관한규정」으로 적혀 있는데, 이것은 개명이 아니라
+        표기법이 바뀐 것뿐이라 알릴 일이 아니다.
+
+        (캡션에는 여전히 당시 표기 그대로 들어간다. 그것이 그 문서에 적힌 이름이다)
+        """
+        if not self.historical_law_name:
+            return False
+        return _without_spaces(self.historical_law_name) != _without_spaces(
+            self.law_name
+        )
 
     @property
     def detail_page_url(self) -> str:
@@ -64,7 +113,7 @@ class LawVersion:
 
     def __str__(self) -> str:
         status = "현행" if self.is_currently_in_effect else "구"
-        return f"{self.law_name} [{self.effective_date_label}] ({status})"
+        return f"{self.display_law_name} [{self.effective_date_label}] ({status})"
 
 
 @dataclass(frozen=True)
@@ -126,6 +175,33 @@ class ArticleCaptureTask:
         return f"{self.article_label} [{self.version.effective_date_label}]"
 
 
+@dataclass(frozen=True)
+class ArticleTextComparison:
+    """
+    앞 개정본과 조문 내용을 견준 결과.
+
+    '같다/다르다' 만 담지 않고 얼마나 닮았는지까지 담는 이유:
+    이름만 바뀌고 내용은 그대로인 개정, 문구만 조금 다듬은 개정이 흔한데
+    글자 하나만 달라도 '다름' 이 되므로 그 사실을 알아챌 수 없다.
+    """
+
+    is_same: bool
+    similarity_ratio: float  # 0.0(전혀 다름) ~ 1.0(완전히 같음)
+
+    @property
+    def is_similar_but_not_same(self) -> bool:
+        """완전히 같지는 않지만 알릴 만큼 닮았는가."""
+        return (
+            not self.is_same
+            and self.similarity_ratio >= config.SIMILARITY_NOTICE_THRESHOLD
+        )
+
+    @property
+    def similarity_percent(self) -> int:
+        """캡션에 적을 백분율. 99.7% 를 100% 로 적으면 안 되므로 내림한다."""
+        return int(self.similarity_ratio * 100)
+
+
 @dataclass
 class CapturedArticle:
     """
@@ -139,7 +215,11 @@ class CapturedArticle:
     pdf_path: Path
     image_paths: list[Path]  # 쪽 순서대로
     article_body_text: str  # 개정본끼리 내용이 같은지 비교할 때 쓴다
-    is_same_as_previous_version: bool = False
+    comparison: ArticleTextComparison = field(
+        default_factory=lambda: ArticleTextComparison(
+            is_same=False, similarity_ratio=0.0
+        )
+    )
 
     @property
     def page_count(self) -> int:

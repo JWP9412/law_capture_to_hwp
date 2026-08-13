@@ -139,9 +139,7 @@ def _capture_one_article(
         pdf_path=pdf_path,
         image_paths=image_paths,
         article_body_text=body_text,
-        is_same_as_previous_version=version_series.has_same_article_text(
-            body_text, previous_body_text
-        ),
+        comparison=version_series.compare_article_text(body_text, previous_body_text),
     )
 
 
@@ -162,7 +160,7 @@ def _insert_into_document(editor, captured: CapturedArticle) -> None:
         if captured.task.should_add_caption:
             caption = version_series.build_caption(
                 captured.task,
-                captured.is_same_as_previous_version,
+                captured.comparison,
                 page_number=page_number,
                 total_pages=total_pages,
             )

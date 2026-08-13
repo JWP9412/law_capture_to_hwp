@@ -265,6 +265,13 @@ class InputView(ttk.Frame):
         self._many_versions_warning = ttk.Label(frame, text="", style="Danger.TLabel")
         self._many_versions_warning.pack(anchor="w", pady=(2, 0))
 
+        # 이름이 바뀐 적이 있는 법령·고시라면 알린다.
+        # (옛 이름으로 찾은 사용자가 엉뚱한 것을 찾았다고 오해하지 않도록)
+        self._name_change_notice = ttk.Label(
+            frame, text="", style="Danger.TLabel", justify="left"
+        )
+        self._name_change_notice.pack(anchor="w", pady=(2, 0))
+
         ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=4)
 
         # 목록만 고정 높이 + 스크롤. 172줄이 창을 밀어내지 않게 한다.
@@ -550,10 +557,10 @@ class InputView(ttk.Frame):
             self._show_search_failure(str(error))
             return
 
-        self._show_search_results(candidates)
+        self._show_search_results(candidates, query)
         self._refresh_version_list()
 
-    def _show_search_results(self, candidates: list) -> None:
+    def _show_search_results(self, candidates: list, query: str = "") -> None:
         """찾은 법령들을 고를 수 있게 목록에 채운다. 첫 번째를 기본으로 고른다."""
         self._candidates = candidates
         self._found_law = candidates[0]
@@ -568,6 +575,19 @@ class InputView(ttk.Frame):
             message = (
                 f"{len(candidates)}건을 찾았습니다. 원하는 것이 아니면 위 목록에서 고르세요."
             )
+
+        # 검색어가 결과 이름에 없으면, 지금은 안 쓰는 옛 이름으로 찾아준 것이다.
+        # 알려주지 않으면 엉뚱한 것이 나왔다고 여기고 검색을 포기하게 된다.
+        if self._controller.was_searched_by_former_name(
+            query, self._found_law.law_name
+        ):
+            message = (
+                f"'{query}' 은(는) 옛 이름입니다. 이름이 바뀌어 지금은 아래 이름으로 나옵니다.\n"
+                "찾으시던 그 문서가 맞으니, 시점만 그때로 맞춰 주세요."
+            )
+            self._search_status_label.config(text=message, foreground="red")
+            return
+
         self._search_status_label.config(text=message, foreground="gray")
 
     def _show_search_failure(self, message: str) -> None:
@@ -657,6 +677,7 @@ class InputView(ttk.Frame):
             widget.destroy()
         self._version_checkboxes.clear()
         self._many_versions_warning.config(text="")
+        self._name_change_notice.config(text="")
         self._version_canvas.yview_moveto(0)
 
         if self._found_law is None:
@@ -688,6 +709,8 @@ class InputView(ttk.Frame):
                     )
                 )
             )
+
+        self._name_change_notice.config(text=_build_name_change_notice(versions))
 
         self._version_hint.config(
             text="빼고 싶은 개정본은 체크를 끄시면 됩니다.", foreground="gray"
@@ -722,10 +745,9 @@ class InputView(ttk.Frame):
         self, version: LawVersion, is_selected_by_default: bool = True
     ) -> None:
         is_selected = tk.BooleanVar(value=is_selected_by_default)
-        status = "현행" if version.is_currently_in_effect else "구"
         VCheckbutton(
             self._version_list_frame,
-            label_text=f"{version.effective_date_label}   {version.promulgation_label[:40]}   ({status})",
+            label_text=_build_version_row_label(version),
             variable=is_selected,
             command=self._refresh_selection_summary,
         ).pack(anchor="w")
@@ -1151,6 +1173,52 @@ class InputView(ttk.Frame):
             messagebox.showinfo("실행", "먼저 조건을 목록에 담아 주세요.")
             return
         self._on_start_requested(list(self._jobs))
+
+
+def _build_version_row_label(version: LawVersion) -> str:
+    """
+    개정본 목록 한 줄에 쓸 문구를 만든다.
+
+    그 판이 시행되던 당시의 이름이 지금 이름과 다르면 함께 보여준다.
+    이름이 바뀐 법령·고시가 드물지 않은데(「주택법」은 1973년에
+    「주택건설촉진법」이었다), 목록에 지금 이름만 나오면 옛 이름으로 찾던
+    사용자가 엉뚱한 것을 찾았다고 여기게 된다.
+    """
+    status = "현행" if version.is_currently_in_effect else "구"
+    row = (
+        f"{version.effective_date_label}   "
+        f"{version.promulgation_label[:40]}   ({status})"
+    )
+    if version.has_different_name_now:
+        row = f"{row}\n        └ 당시 이름: {version.historical_law_name}"
+    return row
+
+
+def _build_name_change_notice(versions: list[LawVersion]) -> str:
+    """
+    '이름이 바뀌었습니다' 안내 문구를 만든다. 알릴 것이 없으면 빈 글자.
+
+    목록에 보이는 판들만 본다. 그 판들이 곧 사용자가 그림으로 만들 것이고,
+    캡션에 들어갈 이름이 지금 이름과 다르다는 사실을 미리 알려야 하기 때문이다.
+    (연혁 전체를 다시 물어볼 필요가 없어 값도 싸다)
+    """
+    former_names = [
+        version.historical_law_name
+        for version in versions
+        if version.has_different_name_now
+    ]
+    if not former_names:
+        return ""
+
+    # 같은 이름이 여러 판에 걸쳐 있으므로 중복을 없애되 순서는 지킨다.
+    unique_former_names = list(dict.fromkeys(former_names))
+    current_name = versions[0].law_name
+
+    lines = ["ⓘ 이름이 바뀐 적이 있습니다. 캡션에는 각 판의 '당시 이름' 이 들어갑니다."]
+    for former_name in unique_former_names:
+        lines.append(f"     당시: {former_name}")
+    lines.append(f"     지금: {current_name}")
+    return "\n".join(lines)
 
 
 def _parse_date(text: str, field_name: str) -> date:

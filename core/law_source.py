@@ -16,7 +16,7 @@ import html
 import re
 import xml.etree.ElementTree as ElementTree
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 import config
@@ -85,6 +85,16 @@ HISTORY_VERSION_ID_PATTERN = re.compile(
 # 시행일과 발령 정보를 각각 뽑아내는 규칙.
 EFFECTIVE_DATE_PATTERN = re.compile(r"\[시행\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*\]")
 PROMULGATION_PATTERN = re.compile(r"\[시행[^\]]*\]\s*\[([^\]]+)\]")
+
+# 개정 이력 한 줄에서 '그 판이 시행되던 당시의 이름' 을 뽑아내는 규칙.
+#
+# 이력 한 줄은 꾸미기 표시를 걷어내면 갈래에 상관없이 이렇게 생겼다.
+#   "4. 자동차압·과압조절형댐퍼의 성능인증 및 제품검사의 기술기준 [시행 2018. 10. 12.] [소방청고시 …]"
+#   "1. 주택법 [시행 2026. 8. 4.] [법률 제21323호, …]"
+# 앞의 순번과 뒤의 '[시행 …]' 사이가 그 판의 이름이다.
+#
+# 이 이름을 읽는 것이 중요한 이유는 models.py 의 historical_law_name 설명에 적어두었다.
+HISTORY_LAW_NAME_PATTERN = re.compile(r"^\s*\d+\.\s*(.+?)\s*\[시행")
 
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 WHITESPACE_IN_NAME_PATTERN = re.compile(r"\s+")
@@ -302,6 +312,75 @@ def list_all_versions(law: LawSearchResult) -> list[LawVersion]:
     return _mark_which_version_is_currently_in_effect(versions, dates_by_version_id)
 
 
+@dataclass(frozen=True)
+class LawNameChange:
+    """
+    이 법령·고시의 이름이 시기에 따라 달랐는지를 담는다.
+
+    화면에 '이 고시는 시기에 따라 이름이 다릅니다' 를 알릴지 판단하는 데 쓴다.
+    """
+
+    oldest_name: str  # 가장 오래된 판의 이름
+    current_name: str  # 지금 이름
+    changed_count: int  # 이력 전체에서 서로 다른 이름이 몇 가지였는지
+
+    @property
+    def has_changed(self) -> bool:
+        return self.changed_count > 1
+
+
+def detect_law_name_change(versions: list[LawVersion]) -> LawNameChange | None:
+    """
+    개정본 목록을 훑어 이름이 바뀐 적이 있는지 살핀다.
+
+    이름이 바뀌는 일은 드물지 않다. 「주택법」은 1973년에 「주택건설촉진법」이었고,
+    「자동차압급기댐퍼의 성능인증 및 제품검사의 기술기준」은 2009년에
+    「자동차압·과압조절형댐퍼의 성능시험기술기준」이었다.
+
+    이것을 알려주지 않으면 두 가지 문제가 생긴다.
+      1) 옛 이름으로 검색한 사용자가 '검색이 안 된다' 고 오해한다
+         (실제로는 찾아지지만 지금 이름으로 나오기 때문)
+      2) 서면에 옛 판을 인용하면서 지금 이름을 적게 된다
+
+    이력을 이미 읽어둔 상태에서 판단하므로 사이트에 다시 물어보지 않는다.
+    이름을 하나도 못 읽었으면 None (알 수 없으므로 아무 말도 하지 않는다).
+    """
+    names_oldest_first = [
+        version.historical_law_name
+        for version in versions
+        if version.historical_law_name
+    ]
+    if not names_oldest_first:
+        return None
+
+    # 띄어쓰기 차이는 다른 이름으로 세지 않는다.
+    # 옛 법령은 이름을 붙여 썼다 (「주택건설기준등에관한규정」).
+    # 그것까지 '이름이 바뀌었다' 고 알리면 쓸데없는 참견이 된다.
+    distinct_names = {_normalize_law_name(name) for name in names_oldest_first}
+
+    return LawNameChange(
+        oldest_name=names_oldest_first[0],
+        current_name=names_oldest_first[-1],
+        changed_count=len(distinct_names),
+    )
+
+
+def was_found_by_former_name(query: str, found_law_name: str) -> bool:
+    """
+    사용자가 '지금은 안 쓰는 옛 이름' 으로 찾아낸 것인지 본다.
+
+    법제처 검색은 옛 이름으로도 찾아주지만 결과는 지금 이름으로 돌려준다.
+    그래서 '과압조절' 로 찾으면 '자동차압급기댐퍼의 성능인증 및 제품검사의 기술기준'
+    한 줄만 나오고, 사용자는 엉뚱한 것이 나왔다고 여긴다.
+
+    검색어가 결과 이름 어디에도 없다면 옛 이름으로 찾아준 경우다.
+    사이트에 다시 물어볼 것 없이 글자만 견주면 되므로 값이 싸다.
+    """
+    if not query.strip():
+        return False
+    return _normalize_law_name(query) not in _normalize_law_name(found_law_name)
+
+
 def _effective_date_on_or_before(
     dates: set[date], reference_date: date
 ) -> date | None:
@@ -444,15 +523,15 @@ def _version_from_search_result(law: LawSearchResult) -> LawVersion:
 def _copy_version_with_effective_date(
     version: LawVersion, effective_date: date
 ) -> LawVersion:
-    """같은 문서인데 표시·다운로드용 시행일만 바꿔 새 상자를 만든다."""
-    return LawVersion(
-        source_kind=version.source_kind,
-        version_id=version.version_id,
-        law_name=version.law_name,
-        effective_date=effective_date,
-        promulgation_label=version.promulgation_label,
-        is_currently_in_effect=version.is_currently_in_effect,
-    )
+    """
+    같은 문서인데 표시·다운로드용 시행일만 바꿔 새 상자를 만든다.
+
+    항목을 하나하나 다시 적지 않고 replace 를 쓰는 이유:
+    LawVersion 에 항목을 새로 더했을 때 여기에 적는 것을 잊으면
+    그 값이 조용히 사라진다. 실제로 '당시 이름' 을 더할 때 이런 곳이
+    세 군데나 있었다. replace 는 바꿀 것만 적으므로 빠뜨릴 수가 없다.
+    """
+    return replace(version, effective_date=effective_date)
 
 
 def _read_version_id(history_entry: str) -> str | None:
@@ -492,10 +571,25 @@ def _parse_history_entries(history_html: str, law: LawSearchResult) -> list[LawV
                 effective_date=effective_date,
                 promulgation_label=promulgation.group(1).strip() if promulgation else "",
                 is_currently_in_effect=False,  # 아래에서 다시 표시한다
+                historical_law_name=_read_historical_law_name(readable_text),
             )
         )
 
     return versions
+
+
+def _read_historical_law_name(readable_text: str) -> str:
+    """
+    개정 이력 한 줄에서 그 판이 시행되던 당시의 이름을 읽어낸다.
+
+    이력 화면은 판마다 그때의 이름을 그대로 적어준다. 그래서 따로 물어볼 것 없이
+    이미 받아온 이력에서 읽기만 하면 된다. (판마다 따로 조회하면 개정본이
+    172개인 주택법 같은 경우 조회를 172번 하게 된다)
+
+    못 읽으면 빈 글자를 돌려준다. 그러면 지금 이름을 그대로 쓰게 된다.
+    """
+    matched = HISTORY_LAW_NAME_PATTERN.search(readable_text)
+    return matched.group(1).strip() if matched else ""
 
 
 def _mark_which_version_is_currently_in_effect(
@@ -517,12 +611,8 @@ def _mark_which_version_is_currently_in_effect(
     current_version_id = current.version_id if current is not None else None
 
     return [
-        LawVersion(
-            source_kind=version.source_kind,
-            version_id=version.version_id,
-            law_name=version.law_name,
-            effective_date=version.effective_date,
-            promulgation_label=version.promulgation_label,
+        replace(
+            version,
             is_currently_in_effect=(
                 current_version_id is not None
                 and version.version_id == current_version_id
@@ -555,14 +645,7 @@ def find_version_effective_on(law: LawSearchResult, reference_date: date) -> Law
     is_current = (
         current_today is not None and picked.version_id == current_today.version_id
     )
-    return LawVersion(
-        source_kind=picked.source_kind,
-        version_id=picked.version_id,
-        law_name=picked.law_name,
-        effective_date=picked.effective_date,
-        promulgation_label=picked.promulgation_label,
-        is_currently_in_effect=is_current,
-    )
+    return replace(picked, is_currently_in_effect=is_current)
 
 
 def find_versions_effective_between(
