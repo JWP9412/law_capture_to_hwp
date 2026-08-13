@@ -44,6 +44,7 @@ class AppWindow(tk.Tk):
         super().__init__()
         apply_theme(self)
         self.title(WINDOW_TITLE)
+        self._apply_window_icon()
         self.geometry(WINDOW_SIZE)
         self.minsize(980, 640)
 
@@ -76,6 +77,26 @@ class AppWindow(tk.Tk):
 
         self._show_input_view()
         self._check_for_messages()
+
+    def _apply_window_icon(self) -> None:
+        """
+        창·작업표시줄에 이 프로그램만의 아이콘을 붙인다.
+
+        아이콘이 없으면 Windows 는 파이썬 기본 아이콘을 쓰는데, 그러면
+        작업표시줄에서 다른 프로그램과 구분이 더 안 된다. 실제로 아이콘이
+        없던 시절에는 같은 방식(bat -> pythonw.exe)으로 실행하는 다른
+        프로그램(CASE-ING)의 고정 아이콘이 대신 뜨는 일이 있었다.
+        (그 문제 자체는 launch.py 의 AppUserModelID 지정으로 고쳤고,
+        이건 그와 별개로 눈에 보이는 우리만의 아이콘을 붙이는 것이다)
+
+        아이콘 파일이 어떤 이유로든 없거나 손상됐어도 창은 뜨는 것이 맞으므로
+        실패는 조용히 넘어간다.
+        """
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+        try:
+            self.iconbitmap(default=str(icon_path))
+        except Exception:
+            pass
 
     def _on_container_resized(self, _event=None) -> None:
         """내용이 바뀌면 스크롤 범위를 다시 잰다."""
