@@ -750,7 +750,8 @@ class InputView(ttk.Frame):
             label_text=_build_version_row_label(version),
             variable=is_selected,
             command=self._refresh_selection_summary,
-        ).pack(anchor="w")
+            anchor="w",  # 버튼이 넓어져도 글자가 가운데로 몰리지 않게 왼쪽 정렬
+        ).pack(fill="x", anchor="w")  # 목록 칸 너비에 맞춰 채움 (줄마다 들쭉날쭉하지 않게)
         self._version_checkboxes.append((is_selected, version))
 
     def _apply_select_all(self) -> None:
