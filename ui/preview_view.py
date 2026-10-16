@@ -16,11 +16,13 @@ from tkinter import ttk
 from core.article_number import (
     ArticleNumber,
     find_article_covering_character_offset,
+    read_article_heading,
 )
 from core.models import LawVersion
 
 SELECTED_PHRASE_TAG = "고른부분"
-SELECTED_PHRASE_BACKGROUND = "#ffe0e0"  # 옅은 빨강 — 밑줄로 고른 부분
+# 기본은 빨강용 옅은 형광펜. 밑줄 색을 바꾸면 set_selected_highlight_color 로 맞춘다.
+SELECTED_PHRASE_BACKGROUND = "#ffe0e0"
 
 # 찾기(Ctrl+F)로 맞춘 곳. 고른 부분(옅은 빨강)과 색을 다르게 해 헷갈리지 않게 한다.
 FOUND_TAG = "찾은곳"
@@ -60,6 +62,11 @@ class PreviewView(ttk.LabelFrame):
         self._on_open_original = on_open_original
         # 빨간 표시를 클릭해 지울 때 왼쪽 칩 목록도 같이 빼기 위한 알림.
         self._on_phrase_removed = on_phrase_removed
+        # 위/아래 버튼. 입력 화면이 조문 칸과 미리보기를 같이 바꾸도록 연결한다.
+        self._on_move_article: Callable[[int], None] | None = None
+        # 본문이 칸보다 짧으면 스크롤해도 화면 맨 위 조가 안 바뀐다.
+        # 위/아래를 연속으로 누를 때 어디를 보고 있었는지 기억한다.
+        self._heading_cursor: int | None = None
         self._shown_versions: list[LawVersion] = []
         # 전체보기일 때만 드래그로 조문 번호를 자동 채운다.
         self._is_full_view_mode = False
@@ -97,7 +104,8 @@ class PreviewView(ttk.LabelFrame):
         self._article_label.pack(side="left", padx=6)
 
         # side=right 는 먼저 pack 한 것이 더 오른쪽에 온다.
-        # 원문 보기를 먼저, 찾기를 나중에 넣으면 화면은 [찾기][원문 보기].
+        # 원문 보기, 찾기, ▼, ▲ 순으로 넣으면
+        # 화면은 [▲] [▼] [찾기] [원문 보기].
         ttk.Button(
             row, text="원문 보기", command=self._on_open_original
         ).pack(side="right")
@@ -105,6 +113,17 @@ class PreviewView(ttk.LabelFrame):
             row, text="찾기", command=self._show_find_bar
         )
         self._find_button.pack(side="right", padx=(0, 4))
+        # side=right 라 나중에 넣은 버튼이 더 왼쪽이다.
+        # 글자 '위/아래' 대신 삼각형으로 둔다. 찾기 막대의 ◀▶ 와 헷갈리지 않게
+        # 조문 이동은 ▲▼ 를 쓴다.
+        self._article_down_button = ttk.Button(
+            row, text="▼", width=3, command=lambda: self._request_article_move(1)
+        )
+        self._article_down_button.pack(side="right", padx=(0, 4))
+        self._article_up_button = ttk.Button(
+            row, text="▲", width=3, command=lambda: self._request_article_move(-1)
+        )
+        self._article_up_button.pack(side="right")
 
     def _build_find_bar(self) -> None:
         """
@@ -215,6 +234,80 @@ class PreviewView(ttk.LabelFrame):
         )
         self._version_picker.current(0)
 
+    def set_on_move_article(self, on_move_article: Callable[[int], None]) -> None:
+        """
+        위/아래 버튼을 입력 화면에 연결한다.
+
+        미리보기는 조문 칸을 모른다. 옆 조를 보여 달라고 입력 화면에 부탁만 한다.
+        """
+        self._on_move_article = on_move_article
+
+    def reveal_adjacent_article(self, step: int) -> tuple[ArticleNumber | None, bool]:
+        """
+        지금 보이는 본문 안에서 이전·다음 조 제목으로 스크롤한다.
+
+        돌려주는 값: (기준이 된 조문, 본문 안에서 이동이 끝났는지)
+        본문에 옆 조가 있으면 그 조로 스크롤하고 True.
+        없으면 지금 조와 False. 호출자가 번호를 바꿔 다시 불러온다.
+        제목이 하나도 없으면 (None, False).
+        """
+        marks = self._collect_heading_marks()
+        if not marks:
+            return None, False
+
+        # 화면 맨 위에 걸려 있는 조가 '지금 보는 조' 다.
+        top_index = self._text_box.index("@0,0")
+        viewport_position = -1
+        for position, (mark, _article) in enumerate(marks):
+            if self._text_box.compare(mark, "<=", top_index):
+                viewport_position = position
+
+        current_position = viewport_position
+        # 본문이 칸에 다 들어가면 스크롤이 맨 끝(1.0)에 고정되고
+        # 화면 맨 위는 계속 첫 조다. 그때는 버튼을 누른 위치를 따른다.
+        _top_fraction, bottom_fraction = self._text_box.yview()
+        if (
+            self._heading_cursor is not None
+            and bottom_fraction >= 0.999
+            and self._heading_cursor > viewport_position
+        ):
+            current_position = self._heading_cursor
+
+        target_position = current_position + (1 if step > 0 else -1)
+        if not 0 <= target_position < len(marks):
+            current_article = marks[current_position][1] if current_position >= 0 else None
+            return current_article, False
+
+        target_mark, target_article = marks[target_position]
+        self._scroll_line_to_top(target_mark)
+        self._heading_cursor = target_position
+        self._article_label.config(text=target_article.label)
+        return target_article, True
+
+    def _request_article_move(self, step: int) -> None:
+        if self._on_move_article is not None:
+            self._on_move_article(step)
+
+    def _collect_heading_marks(self) -> list[tuple[str, ArticleNumber]]:
+        """본문에서 조 제목 줄의 (텍스트 인덱스, 조문 번호) 를 위에서부터 모은다."""
+        marks: list[tuple[str, ArticleNumber]] = []
+        last_line = int(self._text_box.index("end-1c").split(".")[0])
+        for line_number in range(1, last_line + 1):
+            line = self._text_box.get(f"{line_number}.0", f"{line_number}.end")
+            heading = read_article_heading(line)
+            if heading is not None:
+                marks.append((f"{line_number}.0", heading))
+        return marks
+
+    def _scroll_line_to_top(self, text_index: str) -> None:
+        """그 줄이 미리보기 맨 위에 오도록 스크롤한다. see 만 하면 바닥에 걸릴 수 있다."""
+        last_line = int(self._text_box.index("end-1c").split(".")[0])
+        line_number = int(text_index.split(".")[0])
+        if last_line <= 1:
+            self._text_box.yview_moveto(0)
+            return
+        self._text_box.yview_moveto((line_number - 1) / last_line)
+
     @property
     def chosen_version(self) -> LawVersion | None:
         """지금 미리보기로 고른 판."""
@@ -225,6 +318,7 @@ class PreviewView(ttk.LabelFrame):
 
     def show_loading(self, article_label: str) -> None:
         self._is_full_view_mode = False
+        self._heading_cursor = None
         self._article_label.config(text=article_label)
         self._replace_text("")
         self._guide_label.config(text=GUIDE_WHILE_LOADING, foreground="gray")
@@ -233,6 +327,7 @@ class PreviewView(ttk.LabelFrame):
         self, article_label: str, text: str, is_full_view: bool = False
     ) -> None:
         self._is_full_view_mode = is_full_view
+        self._heading_cursor = None
         self._article_label.config(text=article_label)
         self._replace_text(text)
         guide = GUIDE_AFTER_FULL_LOADING if is_full_view else GUIDE_AFTER_LOADING
@@ -254,6 +349,15 @@ class PreviewView(ttk.LabelFrame):
         """
         self._text_box.tag_remove(SELECTED_PHRASE_TAG, "1.0", tk.END)
         self._selected_phrase_ranges.clear()
+
+    def set_selected_highlight_color(self, background_hex: str) -> None:
+        """
+        고른 문구 형광펜 색을 바꾼다.
+
+        밑줄 색 Combobox 와 맞춰, PDF에 그을 색이 미리보기에서도 보이게 한다.
+        이미 칠해 둔 구간에도 바로 반영된다 (태그 설정만 바꾸면 된다).
+        """
+        self._text_box.tag_configure(SELECTED_PHRASE_TAG, background=background_hex)
 
     def remove_selected_phrase(self, phrase: str) -> None:
         """

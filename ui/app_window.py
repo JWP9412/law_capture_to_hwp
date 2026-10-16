@@ -25,6 +25,7 @@ from ui.controller import (
 from ui.input_view import InputView
 from ui.progress_view import ProgressView
 from ui.result_view import ResultView
+from ui.taskbar_identity import apply_taskbar_identity
 from ui.theme import apply_theme
 
 WINDOW_TITLE = "법령 조문 캡처"
@@ -52,6 +53,14 @@ class AppWindow(tk.Tk):
 
         # Canvas + Scrollbar 로 감싸 창이 작아도 내용을 모두 볼 수 있게 한다.
         # 개정본 목록(input_view)에 이미 써 본 패턴을 창 전체에 그대로 쓴다.
+        # 화면 맨 아래에 항상 떠 있는 자리. 스크롤 영역 '바깥' 이다.
+        # [담기]·[실행] 처럼 자주 누르는 버튼을 여기 두면, 창을 줄이거나
+        # 스크롤을 어디에 두어도 늘 보인다.
+        # pack 순서가 중요하다: 아래쪽 자리는 늘어나는 캔버스보다 먼저 붙여야
+        # 창이 작아져도 밀려나지 않는다.
+        self._footer = ttk.Frame(self)
+        self._footer.pack(side="bottom", fill="x")
+
         self._scroll_canvas = tk.Canvas(self, highlightthickness=0)
         self._scrollbar = ttk.Scrollbar(
             self, orient="vertical", command=self._scroll_canvas.yview
@@ -71,12 +80,18 @@ class AppWindow(tk.Tk):
         # 이 연결까지 지워져 휠이 먹통이 되므로, 하위는 절대 unbind_all 하지 않는다.
         self._scroll_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        self._input_view = InputView(self._container, self._controller, self._start_capture)
+        self._input_view = InputView(
+            self._container, self._controller, self._start_capture, self._footer
+        )
         self._progress_view = ProgressView(self._container, self._request_stop)
         self._result_view = ResultView(self._container, self._show_input_view)
 
         self._show_input_view()
         self._check_for_messages()
+
+        # 창이 다 만들어진 뒤에 적어야 한다. (창 번호가 필요하므로)
+        # 이것이 있어야 창을 우클릭해 고정해도 아이콘·실행이 제대로 된다.
+        apply_taskbar_identity(self)
 
     def _apply_window_icon(self) -> None:
         """
@@ -138,6 +153,13 @@ class AppWindow(tk.Tk):
         for view in (self._input_view, self._progress_view, self._result_view):
             view.pack_forget()
         view_to_show.pack(fill="both", expand=True)
+
+        # 하단 고정 바(담기·실행)는 조건 입력 화면에서만 필요하다.
+        # 진행·완료 화면에는 각자의 버튼이 있으므로 숨긴다.
+        # 다시 붙일 때는 before= 로 '캔버스보다 앞' 순서를 지켜야 한다.
+        self._footer.pack_forget()
+        if view_to_show is self._input_view:
+            self._footer.pack(side="bottom", fill="x", before=self._scrollbar)
         self._scroll_canvas.yview_moveto(0)
         self.after_idle(self._on_container_resized)
 

@@ -111,6 +111,22 @@ def _parse_one_part(part: str) -> list[ArticleNumber]:
     )
 
 
+def format_article_numbers_for_entry(article_numbers: list[ArticleNumber]) -> str:
+    """
+    조문 목록을 입력 칸에 다시 넣을 글자로 만든다.
+
+    캡션용 '제1, 2조'는 사람이 다시 읽기 어려워 세트에 저장하지 않는다.
+    '1, 32의2' 처럼 parse_article_numbers 가 알아듣는 형식으로 되돌린다.
+    """
+    parts: list[str] = []
+    for article in article_numbers:
+        if article.branch:
+            parts.append(f"{article.number}의{article.branch}")
+        else:
+            parts.append(str(article.number))
+    return ", ".join(parts)
+
+
 def build_article_range_label(article_numbers: list[ArticleNumber]) -> str:
     """
     캡션·화면에 넣을 조문 표기를 만든다.
@@ -229,6 +245,32 @@ def find_article_covering_character_offset(
         if heading is not None:
             return heading
     return None
+
+
+def read_article_heading(line: str) -> ArticleNumber | None:
+    """한 줄이 조문 제목이면 번호를 돌려준다. 본문에서 옆 조를 찾을 때 쓴다."""
+    return _read_heading_from_line(line.strip())
+
+
+def step_to_adjacent_article_number(
+    article: ArticleNumber, step: int
+) -> ArticleNumber | None:
+    """
+    본문에 옆 조가 없을 때, 번호만 보고 다음·이전 조를 만든다.
+
+    아래(+1)는 번호를 하나 올린다. 제12조 → 제13조.
+    가지는 건너뛴다. 제32조의2 가 있는지는 이 함수가 법령을 읽어 보지 못해
+    알 수 없고, 화면 요청도 '12조 다음은 13조' 이기 때문이다.
+    가지가 붙은 조에서 위로 가면 같은 번호의 본조(제32조의2 → 제32조)로 간다.
+    제1조에서 위로는 갈 곳이 없어 None 이다.
+    """
+    if step > 0:
+        return ArticleNumber(number=article.number + 1)
+    if article.branch:
+        return ArticleNumber(number=article.number)
+    if article.number <= 1:
+        return None
+    return ArticleNumber(number=article.number - 1)
 
 
 def _read_heading_from_line(line: str) -> ArticleNumber | None:

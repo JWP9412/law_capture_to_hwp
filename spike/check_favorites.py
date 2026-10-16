@@ -40,8 +40,8 @@ with tempfile.TemporaryDirectory() as temporary_folder:
     loaded = load_favorites(file_path)
     all_passed &= report("두 건이 저장됐는가", len(loaded) == 2, str(len(loaded)))
     all_passed &= report(
-        "표시 글자",
-        loaded[0].display_label() == "하자판정기준 (고시)",
+        "가나다순이면 공동주택관리법이 앞인가",
+        loaded[0].law_name == "공동주택관리법",
         loaded[0].display_label(),
     )
 

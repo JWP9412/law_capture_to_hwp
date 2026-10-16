@@ -21,6 +21,18 @@ from core import pipeline
 from core.article_number import ArticleNumber, build_article_range_label
 from core.article_text import fetch_article_text, fetch_full_law_text
 from core.errors import LawCaptureError
+from core.capture_set_memory import (
+    CaptureMemoryItem,
+    CaptureMemorySet,
+    add_capture_memory_item,
+    add_capture_memory_set,
+    load_capture_memory_sets,
+    remove_capture_memory_item,
+    remove_capture_memory_set,
+    rename_capture_memory_set,
+    replace_capture_memory_item_law_name,
+    update_capture_memory_item_details,
+)
 from core.favorites import FavoriteLaw, add_favorite, load_favorites, remove_favorite
 from core.law_source import (
     DatePeriod,
@@ -180,6 +192,101 @@ class LawCaptureController:
         raise LawCaptureError(
             f"즐겨찾기 '{favorite.law_name}' 을(를) 다시 찾지 못했습니다. "
             "이름을 검색해 주세요."
+        )
+
+    # -- 사용자 지정 SET (파일만 다루므로 화면 흐름에서 바로 실행한다) --
+
+    def list_capture_memory_sets(self) -> list[CaptureMemorySet]:
+        """저장된 캡처 세트 목록을 읽는다."""
+        return load_capture_memory_sets()
+
+    def add_capture_memory_set(self, name: str) -> list[CaptureMemorySet]:
+        """빈 세트를 만들고, 갱신된 목록을 돌려준다."""
+        return add_capture_memory_set(name)
+
+    def rename_capture_memory_set(
+        self, old_name: str, new_name: str
+    ) -> list[CaptureMemorySet]:
+        """세트 이름을 바꾸고, 갱신된 목록을 돌려준다."""
+        return rename_capture_memory_set(old_name, new_name)
+
+    def remove_capture_memory_set(self, name: str) -> list[CaptureMemorySet]:
+        """세트를 지우고, 갱신된 목록을 돌려준다."""
+        return remove_capture_memory_set(name)
+
+    def add_capture_memory_item(
+        self, set_name: str, item: CaptureMemoryItem
+    ) -> list[CaptureMemorySet]:
+        """세트에 법령·조문·밑줄 한 줄을 넣고, 갱신된 목록을 돌려준다."""
+        return add_capture_memory_item(set_name, item)
+
+    def remove_capture_memory_item(
+        self, set_name: str, item_index: int
+    ) -> list[CaptureMemorySet]:
+        """세트에서 한 줄을 빼고, 갱신된 목록을 돌려준다."""
+        return remove_capture_memory_item(set_name, item_index)
+
+    def update_capture_memory_item_details(
+        self,
+        set_name: str,
+        item_index: int,
+        article_text: str,
+        underline_phrases: tuple[str, ...],
+        underline_color_name: str,
+    ) -> bool:
+        """
+        항목의 조문·밑줄·색만 고친다.
+
+        다른 줄과 조문이 겹치면 False. 법령 번호는 바꾸지 않는다.
+        """
+        return update_capture_memory_item_details(
+            set_name,
+            item_index,
+            article_text,
+            underline_phrases,
+            underline_color_name,
+        )
+
+    def replace_capture_memory_item_law_name(
+        self, set_name: str, item_index: int, new_law_name: str
+    ) -> list[CaptureMemorySet]:
+        """
+        개명을 알아챘을 때 세트에 적힌 법령 이름을 지금 이름으로 고친다.
+
+        법령 번호는 그대로 두고 표시 이름만 바꾼다.
+        """
+        return replace_capture_memory_item_law_name(
+            set_name, item_index, new_law_name
+        )
+
+    def resolve_capture_memory_item(self, item: CaptureMemoryItem) -> LawSearchResult:
+        """
+        세트 항목을 검색 결과로 바꾼다.
+
+        저장해 둔 이름으로 찾고, 법령 번호가 같은 것을 고른다.
+        이름이 바뀌었어도 법제처가 옛 이름으로 지금 법령을 돌려주면
+        번호가 같아 같은 법령으로 잡힌다.
+        번호가 맞는 것이 없으면 첫 결과를 집지 않는다.
+        (이름이 비슷한 다른 법을 담으면 서면이 틀린다)
+        """
+        candidates = search_laws(item.law_name, item.source_kind)
+        for candidate in candidates:
+            if (
+                item.law_id
+                and candidate.law_id == item.law_id
+                and candidate.source_kind is item.source_kind
+            ):
+                return candidate
+            if (
+                not item.law_id
+                and candidate.law_name == item.law_name
+                and candidate.source_kind is item.source_kind
+            ):
+                return candidate
+
+        raise LawCaptureError(
+            f"'{item.law_name}' 을(를) 다시 찾지 못했습니다. "
+            "세트에서 지우고 지금 이름으로 다시 넣어 주세요."
         )
 
     # -- 미리보기용 조문 내용 (0.5초 남짓이지만 인터넷을 쓰므로 별도 흐름에서) --

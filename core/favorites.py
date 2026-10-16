@@ -78,6 +78,9 @@ def load_favorites(file_path: Path | None = None) -> list[FavoriteLaw]:
         favorite = _favorite_from_json_entry(entry)
         if favorite is not None:
             favorites.append(favorite)
+    # 넣은 순서가 아니라 가나다순으로 보여 준다.
+    # 한글은 글자 부호 순서가 가나다순과 같아서, 별도 언어 설정 없이 이름만 정렬한다.
+    favorites.sort(key=lambda item: item.law_name)
     return favorites
 
 

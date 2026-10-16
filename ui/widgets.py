@@ -7,6 +7,51 @@ from tkinter import ttk
 from ui import theme
 
 
+AUTO_WRAP_LABEL_STYLES = ("Hint.TLabel", "Danger.TLabel")
+
+# 카드 오른쪽 가장자리에서 글자를 띄워 둘 여유(테두리·안쪽 여백·스크롤바 몫)
+AUTO_WRAP_RIGHT_MARGIN = 34
+AUTO_WRAP_MINIMUM_WIDTH = 120
+
+
+def _iter_descendants(widget):
+    for child in widget.winfo_children():
+        yield child
+        yield from _iter_descendants(child)
+
+
+def install_auto_wrap(card: ttk.LabelFrame) -> None:
+    """
+    카드 안의 안내문이 카드 폭을 넘지 않고 알아서 줄바꿈되게 한다.
+
+    왜 필요한가:
+      글자 라벨은 줄바꿈 기준(wraplength)을 정해 주지 않으면 글자 전체를
+      한 줄로 펴서 '이만큼의 폭이 필요하다' 고 요구한다. 긴 안내문 하나가
+      700px 를 요구하면 그 카드 전체가 그만큼 넓어져야 하는데, 창이 작으면
+      왼쪽 열은 그보다 좁게 배정되므로 오른쪽이 잘려 나간다.
+      (실제로 [미리보기]·[전체보기]·[밑줄 초기화] 버튼이 잘렸다)
+
+    어떻게 하는가:
+      카드 폭이 바뀔 때마다, 카드 안 안내문마다 '카드 오른쪽 끝까지 남은 폭'
+      만큼으로 줄바꿈 기준을 다시 정한다. 안내문이 놓인 왼쪽 위치를 빼서 계산하므로
+      들여쓴 자리에 있는 안내문도 맞는다. 카드 안에 나중에 생기는 안내문도
+      다음 폭 변화 때 함께 처리된다.
+    """
+
+    def rewrap(_event=None) -> None:
+        card_right_edge = card.winfo_rootx() + card.winfo_width()
+        for widget in _iter_descendants(card):
+            if not isinstance(widget, ttk.Label):
+                continue
+            if str(widget.cget("style")) not in AUTO_WRAP_LABEL_STYLES:
+                continue
+            available = card_right_edge - widget.winfo_rootx() - AUTO_WRAP_RIGHT_MARGIN
+            widget.configure(wraplength=max(AUTO_WRAP_MINIMUM_WIDTH, available))
+
+    card.bind("<Configure>", rewrap, add="+")
+    card.after_idle(rewrap)
+
+
 class StepCard(ttk.LabelFrame):
     """
     번호가 붙은 카드 컨테이너.

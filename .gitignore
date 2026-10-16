@@ -10,6 +10,7 @@ out/
 logs/
 spike_out/
 user_favorites.json
+user_capture_set_memory.json
 *.hwp
 *.pdf
 *.png

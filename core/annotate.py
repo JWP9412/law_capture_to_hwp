@@ -56,7 +56,10 @@ OCCURRENCE_MARKER_PATTERN = re.compile(r"^(.*?)\s*\[(\d+)번째\]\s*$")
 
 
 def underline_and_capture(
-    pdf_path: Path, underline_phrases: list[str], first_image_path: Path
+    pdf_path: Path,
+    underline_phrases: list[str],
+    first_image_path: Path,
+    underline_color: tuple[float, float, float] | None = None,
 ) -> list[Path]:
     """
     PDF 에 밑줄을 긋고 본문 부분만 그림으로 잘라낸다. 쪽마다 그림 하나씩 만든다.
@@ -72,18 +75,32 @@ def underline_and_capture(
     문구 끝에 " [N번째]" 가 붙어 있으면 그 순번의 자리에만 밑줄을 긋는다.
     없으면 지금처럼 나오는 자리마다 모두 긋는다.
 
+    밑줄 목록이 비어 있으면 선을 긋지 않고 조문 본문만 그림으로 자른다.
+    (사용자가 밑줄 없이 조문만 넣고 싶을 때)
+
+    underline_color 를 안 주면 config 기본(빨강)을 쓴다.
+
     돌려주는 것은 만들어진 그림들의 목록이다. 한 쪽이면 하나만 들어있다.
     """
+    color_to_use = (
+        underline_color if underline_color is not None else config.UNDERLINE_COLOR
+    )
     document = fitz.open(pdf_path)
     try:
-        _draw_underlines_on_all_pages(document, underline_phrases, pdf_path)
+        if underline_phrases:
+            _draw_underlines_on_all_pages(
+                document, underline_phrases, pdf_path, color_to_use
+            )
         return _capture_all_pages(document, first_image_path, pdf_path)
     finally:
         document.close()
 
 
 def _draw_underlines_on_all_pages(
-    document: fitz.Document, underline_phrases: list[str], pdf_path: Path
+    document: fitz.Document,
+    underline_phrases: list[str],
+    pdf_path: Path,
+    underline_color: tuple[float, float, float],
 ) -> None:
     """문구마다 모든 쪽을 뒤져 밑줄을 긋는다. 어느 쪽에도 없으면 오류를 낸다."""
     for phrase in underline_phrases:
@@ -97,7 +114,7 @@ def _draw_underlines_on_all_pages(
                 # 순번이 없으면 전부 긋고, 있으면 그 순번만 긋는다.
                 if occurrence_index is None or seen_count == occurrence_index:
                     for text_area in areas:
-                        _draw_underline_below_text(page, text_area)
+                        _draw_underline_below_text(page, text_area, underline_color)
                     was_found_somewhere = True
 
         if not was_found_somewhere:
@@ -296,9 +313,13 @@ def _group_into_line_areas(characters: list[_PlacedCharacter]) -> list[fitz.Rect
     return areas
 
 
-def _draw_underline_below_text(page: fitz.Page, text_area: fitz.Rect) -> None:
+def _draw_underline_below_text(
+    page: fitz.Page,
+    text_area: fitz.Rect,
+    underline_color: tuple[float, float, float],
+) -> None:
     """
-    글자 아래에 빨간 선을 긋는다.
+    글자 아래에 지정한 색의 선을 긋는다.
 
     PyMuPDF 에 밑줄 기능이 따로 있지만 쓰지 않는다. 두 가지 문제 때문이다.
       - 그 기능은 글자 영역의 90% 지점에 선을 긋는데, 한글은 받침(ㄱ, ㅈ 등)이
@@ -306,15 +327,23 @@ def _draw_underline_below_text(page: fitz.Page, text_area: fitz.Rect) -> None:
         (알파벳은 받침이 없어 문제가 안 되므로 그렇게 만들어진 것이다)
       - 그 기능은 선 두께를 지정할 수 없다.
 
-    그래서 직접 선을 긋는다. 그러면 위치와 두께를 원하는 대로 정할 수 있다.
+    그래서 직접 선을 긋는다. 그러면 위치·두께·색을 원하는 대로 정할 수 있다.
     """
     underline_height = text_area.y1 + config.UNDERLINE_GAP_BELOW_TEXT_IN_POINTS
     page.draw_line(
         fitz.Point(text_area.x0, underline_height),
         fitz.Point(text_area.x1, underline_height),
-        color=config.UNDERLINE_COLOR,
+        color=underline_color,
         width=config.UNDERLINE_THICKNESS_IN_POINTS,
     )
+
+
+# 제목 위에만 붙는 법제처 안내문. 본문에 같은 말이 나와도 맨 위 줄이 아니면 자르지 않는다.
+_TOP_NOTICE_MARKERS = (
+    "본 법령은",
+    "본 행정규칙은",
+    "아이콘을 통해 확인",
+)
 
 
 def find_content_area(page: fitz.Page) -> fitz.Rect:
@@ -324,52 +353,104 @@ def find_content_area(page: fitz.Page) -> fitz.Rect:
     법령정보센터가 만드는 PDF 는 맨 위에 문서 이름, 맨 아래에
     '법제처 / 국가법령정보센터 / 쪽번호' 가 인쇄되어 있고,
     본문과의 사이에 가로 선이 하나씩 그어져 있다.
-    그 두 선 사이가 우리가 원하는 부분이다.
 
-    제목·시행일·소관부처와 우측 상단 QR 코드는 이 안에 들어있어 함께 담긴다.
+    그 두 선 사이라도, 첫 쪽 맨 위에는 '본 법령은 …' 안내문과 QR 이 있다.
+    서면에 넣을 그림은 법령 제목부터면 충분하므로 그 안내문과 그 위 빈칸은 뺀다.
+    안내문이 없는 쪽(이어지는 쪽, 안내문이 없는 고시)은 구분선 사이를 그대로 담는다.
     """
     header_line_height, footer_line_height = _find_horizontal_rule_heights(page)
-
-    def lies_between_the_rules(area: fitz.Rect) -> bool:
-        return area.y0 > header_line_height and area.y1 < footer_line_height
+    text_lines = _text_lines_between_rules(page, header_line_height, footer_line_height)
+    title_top, notice_bottom = _title_top_after_notice(text_lines, header_line_height)
 
     content_area = fitz.Rect()
-    for block in page.get_text("blocks"):
-        block_area = fitz.Rect(block[:4])
-        if lies_between_the_rules(block_area):
-            content_area |= block_area
+    for line_area, _text in text_lines:
+        if line_area.y0 + 0.5 < title_top:
+            continue
+        content_area |= line_area
 
     for image_info in page.get_image_info():
         image_area = fitz.Rect(image_info["bbox"])
-        if lies_between_the_rules(image_area):
-            content_area |= image_area
+        if image_area.y0 <= header_line_height or image_area.y1 >= footer_line_height:
+            continue
+        # 제목보다 위에 있는 QR 은 넣지 않는다. 조문 안의 그림은 제목 아래에 있다.
+        if image_area.y0 + 0.5 < title_top:
+            continue
+        content_area |= image_area
 
     if content_area.is_empty:
         return content_area
 
     return _add_padding_without_crossing_the_rules(
-        content_area, header_line_height, footer_line_height, page
+        content_area, notice_bottom, footer_line_height, page
     )
+
+
+def _text_lines_between_rules(
+    page: fitz.Page, header_line_height: float, footer_line_height: float
+) -> list[tuple[fitz.Rect, str]]:
+    """
+    구분선 사이에 있는 글 줄을 위에서부터 모은다.
+
+    블록 단위로 자르면 안내문과 제목이 한 덩어리로 붙어 안내문을 못 뺀다.
+    줄 단위로 봐야 제목 줄의 맨 위를 정확히 집을 수 있다.
+    """
+    lines: list[tuple[fitz.Rect, str]] = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            line_area = fitz.Rect(line["bbox"])
+            if not (line_area.y0 > header_line_height and line_area.y1 < footer_line_height):
+                continue
+            text = "".join(span.get("text", "") for span in line.get("spans", []))
+            if text.strip():
+                lines.append((line_area, text))
+    lines.sort(key=lambda item: (item[0].y0, item[0].x0))
+    return lines
+
+
+def _title_top_after_notice(
+    text_lines: list[tuple[fitz.Rect, str]], header_line_height: float
+) -> tuple[float, float]:
+    """
+    법령 제목이 시작하는 높이와, 그 위로 올라가면 안 되는 높이를 돌려준다.
+
+    맨 위부터 이어진 안내문만 건너뛴다. 안내문이 없으면 첫 글 줄이 제목(또는 본문)이다.
+    두 번째 값은 여백을 줄 때 안내문 글자에 닿지 않게 막는 경계다.
+    """
+    notice_bottom = header_line_height
+    for line_area, text in text_lines:
+        if not _is_top_notice_text(text):
+            return line_area.y0, notice_bottom
+        notice_bottom = max(notice_bottom, line_area.y1)
+    if text_lines:
+        return text_lines[0][0].y0, header_line_height
+    return header_line_height, header_line_height
+
+
+def _is_top_notice_text(text: str) -> bool:
+    """법제처가 제목 위에 붙이는 안내문인지. 띄어쓰기는 무시한다."""
+    compact = WHITESPACE_PATTERN.sub("", text)
+    return any(WHITESPACE_PATTERN.sub("", marker) in compact for marker in _TOP_NOTICE_MARKERS)
 
 
 def _add_padding_without_crossing_the_rules(
     content_area: fitz.Rect,
-    header_line_height: float,
+    upper_limit: float,
     footer_line_height: float,
     page: fitz.Page,
 ) -> fitz.Rect:
     """
-    잘라낼 영역 둘레에 여백을 주되, 위아래 구분선을 넘지 않게 막는다.
+    잘라낼 영역 둘레에 여백을 주되, 위아래 경계를 넘지 않게 막는다.
 
-    여백을 그냥 더하면 구분선 너머의 머리말·꼬리말이 조금씩 딸려 들어온다.
-    법령은 구분선과 본문 사이가 좁아서 실제로 머리말 글자가 잘린 채
-    그림 위쪽에 걸쳐 들어오는 일이 있었다.
+    위 경계는 머리말 구분선이거나, 제목 위 안내문이 있으면 그 안내문 아래다.
+    여백을 그냥 더하면 안내문·머리말 글자가 잘린 채 그림 위에 걸친다.
     """
     padding = config.CAPTURE_PADDING_IN_POINTS
 
     return fitz.Rect(
         max(content_area.x0 - padding, 0.0),
-        max(content_area.y0 - padding, header_line_height),
+        max(content_area.y0 - padding, upper_limit),
         min(content_area.x1 + padding, page.rect.width),
         min(content_area.y1 + padding, footer_line_height),
     )

@@ -130,11 +130,19 @@ class ArticleCaptureJob:
     target_versions: list[LawVersion]  # 시행일 오래된 순으로 정렬되어 들어온다
     article_numbers: list[ArticleNumber]
     underline_phrases: list[str]
+    # PDF 밑줄 색 (PyMuPDF 0~1 RGB). 기본은 빨강.
+    underline_color: tuple[float, float, float] = field(
+        default_factory=lambda: config.UNDERLINE_COLOR
+    )
     # 그림을 넣을 기존 한글 문서. 비워두면(None) 새 문서를 만든다.
     target_hwp_path: Path | None = None
     insertion_mode: InsertionMode = InsertionMode.APPEND_TO_END
     should_add_caption: bool = True
     should_add_border: bool = True
+    # 사용자 지정 SET에 넣을 때 쓴다. 개정돼도 같은 법령을 가리키는 번호다.
+    # 예전 코드가 이름만 넣어도 되도록 비어 있을 수 있다.
+    law_id: str = ""
+    kind_label: str = ""
 
     @property
     def expected_figure_count(self) -> int:
@@ -164,6 +172,10 @@ class ArticleCaptureTask:
     underline_phrases: list[str]
     target_hwp_path: Path | None
     insertion_mode: InsertionMode
+    # PDF 밑줄 색 (PyMuPDF 0~1 RGB). 기본은 빨강.
+    underline_color: tuple[float, float, float] = field(
+        default_factory=lambda: config.UNDERLINE_COLOR
+    )
     should_add_caption: bool = True
     should_add_border: bool = True
 

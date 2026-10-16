@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
+import fitz
 from core.annotate import extract_article_body_text, underline_and_capture
 from core.errors import UnderlinePhraseNotFoundError
 
@@ -38,6 +39,19 @@ for pdf_name, phrases in CASES:
     print(f"[완료] {pdf_path.stem[-14:]}  밑줄 {len(phrases)}건 -> "
           f"그림 {len(made_images)}장 ({total_kilobytes}KB)")
 
+# 색을 바꿔 그을 수 있는지 (첫 케이스가 있을 때만)
+first_case = CASES[0]
+first_pdf = PDF_DIRECTORY / first_case[0]
+if first_pdf.exists():
+    blue_rgb = config.underline_color_for_name("파랑")
+    blue_path = IMAGE_DIRECTORY / (first_pdf.stem + "_파랑.png")
+    underline_and_capture(
+        first_pdf, first_case[1], blue_path, underline_color=blue_rgb
+    )
+    print(f"[완료] 파랑 밑줄 시험 -> {blue_path.name}")
+else:
+    print("[건너뜀] 파랑 밑줄 시험 (PDF 없음)")
+
 print("\n=== 없는 문구를 넣었을 때 ===")
 first_pdf = PDF_DIRECTORY / CASES[0][0]
 if first_pdf.exists():
@@ -61,6 +75,36 @@ for pdf_name, _ in CASES:
     if pdf_path.exists():
         body = extract_article_body_text(pdf_path)
         print(f"  {pdf_path.stem[-8:]}: {len(body)}자 / {body[:66]}...")
+
+print("\n=== 제목 위 안내문을 뺐는가 ===")
+from core.annotate import find_content_area
+
+def _top_lines_of_capture(pdf_path: Path) -> list[str]:
+    """자른 영역 맨 위 글 몇 줄. 안내문이 남았는지 볼 때 쓴다."""
+    document = fitz.open(pdf_path)
+    try:
+        clip = find_content_area(document[0])
+        clipped_text = document[0].get_text("text", clip=clip)
+    finally:
+        document.close()
+    return [line.strip() for line in clipped_text.splitlines() if line.strip()]
+
+
+title_crop_targets = list(PDF_DIRECTORY.glob("*.pdf"))
+if not title_crop_targets:
+    print("  [건너뜀] PDF 가 없습니다")
+else:
+    for pdf_path in title_crop_targets:
+        top_lines = _top_lines_of_capture(pdf_path)
+        top_text = " ".join(top_lines[:4])
+        has_notice = any(
+            marker in top_text
+            for marker in ("본 법령은", "본 행정규칙은", "아이콘을 통해 확인")
+        )
+        print(
+            f"  [{'문제' if has_notice else '정상'}] {pdf_path.name[:40]} "
+            f"맨 위: {top_text[:80]}"
+        )
 
 print("\n=== 순번 밑줄 (제7조의 '균열') ===")
 article7 = PDF_DIRECTORY / CASES[1][0]

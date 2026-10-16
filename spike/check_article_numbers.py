@@ -12,6 +12,7 @@ from core.article_number import (
     ArticleNumber,
     build_article_range_label,
     parse_article_numbers,
+    step_to_adjacent_article_number,
 )
 
 
@@ -82,6 +83,24 @@ label_cases = [
 for articles, expected in label_cases:
     got = build_article_range_label(articles)
     all_passed &= report(expected, got == expected, got)
+
+print("\n=== 5. 옆 조문 ===")
+all_passed &= report(
+    "12 아래는 13",
+    step_to_adjacent_article_number(ArticleNumber(12), 1) == ArticleNumber(13),
+)
+all_passed &= report(
+    "13 위는 12",
+    step_to_adjacent_article_number(ArticleNumber(13), -1) == ArticleNumber(12),
+)
+all_passed &= report(
+    "32의2 위는 32",
+    step_to_adjacent_article_number(ArticleNumber(32, 2), -1) == ArticleNumber(32),
+)
+all_passed &= report(
+    "1 위는 없음",
+    step_to_adjacent_article_number(ArticleNumber(1), -1) is None,
+)
 
 print("\n" + "=" * 58)
 print("통과" if all_passed else "실패 — 위 목록을 보세요")

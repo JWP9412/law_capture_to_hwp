@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.article_number import ArticleNumber
 from core.models import CaptureFailure, CapturedArticle, CaptureRunResult
 from ui.app_window import AppWindow
 
@@ -61,6 +62,12 @@ all_passed &= report(
     str(view._remove_selected_job_button.cget("state")) == "disabled"
     and str(view._remove_all_jobs_button.cget("state")) == "disabled",
 )
+all_passed &= report(
+    "실행 왼쪽에 저장된 폴더 열기 버튼이 있는가",
+    view._open_saved_folder_button.cget("text") == "저장된 폴더 열기"
+    and view._open_saved_folder_button.winfo_rootx() + view._open_saved_folder_button.winfo_width()
+    <= view._start_button.winfo_rootx(),
+)
 
 print("\n=== 2. 법령 검색 ===")
 set_entry(view._law_name_entry, "하자판정기준")
@@ -81,19 +88,36 @@ version_count = len(view._version_checkboxes)
 all_passed &= report("개정본이 목록에 찼는가", version_count == 2, f"{version_count}개")
 for _, version in view._version_checkboxes:
     print(f"          {version}")
+view.version_list_canvas.update_idletasks()
+first_version_row = view._version_list_frame.winfo_children()[0]
+gap_above_first_row = first_version_row.winfo_rooty() - view.version_list_canvas.winfo_rooty()
+all_passed &= report(
+    "첫 개정본이 목록 칸 맨 위에 붙는가",
+    0 <= gap_above_first_row < 8,
+    f"{gap_above_first_row}px",
+)
 
 print("\n=== 3-2. 전체 선택/해제 ===")
-all_passed &= report("처음엔 전부 선택돼 있는가",
-                     all(is_on.get() for is_on, _ in view._version_checkboxes))
+# 사용자 결정: 어느 모드에서든 개정본은 처음에 전부 해제된 상태로 시작한다.
+all_passed &= report("처음엔 전부 해제돼 있는가",
+                     not any(is_on.get() for is_on, _ in view._version_checkboxes))
+all_passed &= report("처음엔 '전체 선택' 도 꺼져 있는가",
+                     not view._are_all_versions_selected.get())
+all_passed &= report("처음 개수 표시가 맞는가",
+                     view._selected_count_label.cget("text") == "2개 중 0개 선택",
+                     view._selected_count_label.cget("text"))
+view._are_all_versions_selected.set(True)
+view._apply_select_all()
+window.update()
 all_passed &= report(
-    "개정본 체크박스 표시가 v 형태인가",
+    "체크하면 개정본 체크박스 표시가 v 형태인가",
     any(
         read_text_option(widget).startswith("v ")
         for widget in iter_widgets(view._version_list_frame)
         if "시행" in read_text_option(widget)
     ),
 )
-all_passed &= report("개수 표시가 맞는가",
+all_passed &= report("전체 선택하면 개수 표시가 맞는가",
                      view._selected_count_label.cget("text") == "2개 중 2개 선택",
                      view._selected_count_label.cget("text"))
 
@@ -137,18 +161,24 @@ all_passed &= report(
     view._preview_view.master == view._right_column,
 )
 all_passed &= report(
-    "3번 카드에 '목록 담기' 버튼이 있는가",
+    "3번 카드 안(입력하던 자리)에 '목록 담기' 버튼이 있는가",
     any(
-        "목록에 담기" in read_text_option(widget)
+        read_text_option(widget) == "＋ 이 조건을 목록에 담기"
         for widget in iter_widgets(view._article_card)
     ),
 )
 all_passed &= report(
-    "3번 카드에 아래 화살표 안내가 있는가",
-    any(
-        "↓ 아래 작업 대기 목록에 추가됩니다" in read_text_option(widget)
-        for widget in iter_widgets(view._article_card)
+    "고정 바에는 '목록 담기' 버튼이 없는가 (중복 방지)",
+    not any(
+        read_text_option(widget) == "＋ 이 조건을 목록에 담기"
+        for widget in iter_widgets(window._footer)
     ),
+)
+all_passed &= report(
+    "고정 바에 [실행] 이 있고 스크롤 영역 밖에 있는가 (스크롤과 무관하게 보이려면)",
+    window._footer.master is window
+    and window._footer.winfo_manager() == "pack"
+    and str(window._footer.pack_info().get("side")) == "bottom",
 )
 all_passed &= report(
     "조문 번호 안내문이 왼쪽 고정으로 보이는가",
@@ -202,6 +232,208 @@ view._reset_underline_phrases()
 window.update()
 all_passed &= report("밑줄 초기화가 칩 목록을 비우는가", len(view._underline_phrases) == 0)
 
+print("\n=== 3-4b. 밑줄 색 고르기 ===")
+import config as app_config
+from ui.preview_view import SELECTED_PHRASE_TAG
+
+all_passed &= report(
+    "밑줄 색 기본값이 빨강인가",
+    view._underline_color_picker.get() == app_config.DEFAULT_UNDERLINE_COLOR_NAME,
+    view._underline_color_picker.get(),
+)
+default_highlight = view.preview_view._text_box.tag_cget(
+    SELECTED_PHRASE_TAG, "background"
+)
+all_passed &= report(
+    "미리보기 형광펜 기본이 빨강용인가",
+    default_highlight == app_config.preview_highlight_for_name("빨강"),
+    default_highlight,
+)
+view._underline_color_picker.set("파랑")
+# Combobox 의 .set() 은 선택 이벤트를 안 보낼 수 있어, 화면에서 고른 것과 같이 처리한다.
+view._on_underline_color_changed()
+window.update()
+blue_highlight = view.preview_view._text_box.tag_cget(
+    SELECTED_PHRASE_TAG, "background"
+)
+all_passed &= report(
+    "파랑 선택 시 미리보기 형광펜이 바뀌는가",
+    blue_highlight == app_config.preview_highlight_for_name("파랑"),
+    blue_highlight,
+)
+# 개정본이 하나 이상 켜져 있어야 작업을 만들 수 있다.
+if view._version_checkboxes:
+    view._version_checkboxes[0][0].set(True)
+set_entry(view._article_entry, "1")
+view.add_underline_phrase("시험문구")
+try:
+    blue_job = view._build_job_from_inputs()
+    all_passed &= report(
+        "작업에 파랑 색이 들어가는가",
+        blue_job.underline_color == app_config.underline_color_for_name("파랑"),
+        str(blue_job.underline_color),
+    )
+except ValueError as error:
+    all_passed &= report("작업에 파랑 색이 들어가는가", False, str(error))
+view._underline_color_picker.set(app_config.DEFAULT_UNDERLINE_COLOR_NAME)
+view._on_underline_color_changed()
+view._reset_underline_phrases()
+
+print("\n=== 3-4c. 사용자 지정 SET ===")
+import tempfile
+from unittest.mock import patch
+
+from core.capture_set_memory import (
+    CaptureMemoryItem,
+    CaptureMemoryNameChange,
+    add_capture_memory_item,
+    add_capture_memory_set,
+    build_name_change_notice,
+)
+
+memory_notice = build_name_change_notice(
+    [
+        CaptureMemoryNameChange(
+            stored_law_name="주택건설촉진법",
+            current_law_name="주택법",
+            historical_law_name="주택건설촉진법",
+        )
+    ]
+)
+all_passed &= report(
+    "이름 변경 안내 문구가 만들어지는가",
+    "지금 이름으로 바꿔" in memory_notice and "당시 이름" in memory_notice,
+    memory_notice,
+)
+set_label_found = any(
+    read_text_option(widget) == "사용자 지정 SET" for widget in iter_widgets(view)
+)
+all_passed &= report("즐겨찾기 아래에 사용자 지정 SET 칸이 있는가", set_label_found)
+
+if found is not None:
+    with tempfile.TemporaryDirectory() as temporary_folder:
+        memory_file = Path(temporary_folder) / "user_capture_set_memory.json"
+        saved_memory_path = app_config.CAPTURE_SET_MEMORY_FILE_PATH
+        app_config.CAPTURE_SET_MEMORY_FILE_PATH = memory_file
+        try:
+            add_capture_memory_set("감정 기준에 관한 의견서", memory_file)
+            add_capture_memory_item(
+                "감정 기준에 관한 의견서",
+                CaptureMemoryItem(
+                    law_name=found.law_name,
+                    law_id=found.law_id,
+                    source_kind=found.source_kind,
+                    kind_label=found.kind_label,
+                    article_text="1",
+                    underline_phrases=("목적",),
+                    underline_color_name="파랑",
+                ),
+                memory_file,
+            )
+            view._refresh_capture_memory_picker()
+            view._capture_memory_picker.set("감정 기준에 관한 의견서")
+            set_entry(view._capture_memory_date_entry, "2025-06-01")
+            jobs_before = len(view._jobs)
+            shown_messages: list[str] = []
+
+            def _capture_showinfo(_title, message):
+                shown_messages.append(message)
+
+            with patch("ui.input_view.messagebox.showinfo", side_effect=_capture_showinfo):
+                view._add_jobs_from_capture_memory()
+            window.update()
+            all_passed &= report(
+                "이 시점으로 담기가 작업을 더하는가",
+                len(view._jobs) == jobs_before + 1,
+                f"{jobs_before} -> {len(view._jobs)}",
+            )
+            all_passed &= report(
+                "담기 안내가 떴는가",
+                bool(shown_messages) and "1건을 담은 목록" in shown_messages[-1],
+                shown_messages[-1] if shown_messages else "",
+            )
+
+            from datetime import date
+
+            from config import LawSourceKind
+            from core.article_number import parse_article_numbers
+            from core.capture_set_memory import load_capture_memory_sets
+            from core.models import ArticleCaptureJob, LawVersion
+            from ui.capture_set_memory_dialog import CaptureSetMemoryDialog
+
+            add_capture_memory_set("대기목록세트", memory_file)
+            view._refresh_capture_memory_picker()
+            view._capture_memory_picker.set("대기목록세트")
+            saved_jobs = list(view._jobs)
+            view._jobs.clear()
+            view._job_listbox.delete(0, tk.END)
+
+            def _memory_job(article_text: str, phrase: str) -> ArticleCaptureJob:
+                return ArticleCaptureJob(
+                    law_name="주택법",
+                    target_versions=[
+                        LawVersion(
+                            source_kind=LawSourceKind.STATUTE,
+                            version_id="확인용",
+                            law_name="주택법",
+                            effective_date=date(2025, 6, 1),
+                            promulgation_label="",
+                            is_currently_in_effect=False,
+                        )
+                    ],
+                    article_numbers=parse_article_numbers(article_text),
+                    underline_phrases=[phrase],
+                    underline_color=app_config.underline_color_for_name("초록"),
+                    law_id="law-999",
+                    kind_label="법률",
+                )
+
+            view._append_job_to_list(_memory_job("1", "목적"))
+            view._append_job_to_list(_memory_job("32의2", "가지번호"))
+            queue_messages: list[str] = []
+
+            def _capture_queue_info(_title, message):
+                queue_messages.append(message)
+
+            with patch("ui.input_view.messagebox.showinfo", side_effect=_capture_queue_info):
+                view._add_waiting_jobs_to_capture_memory()
+            stored_sets = load_capture_memory_sets(memory_file)
+            stored_set = next(item for item in stored_sets if item.name == "대기목록세트")
+            stored_articles = [item.article_text for item in stored_set.items]
+            all_passed &= report(
+                "대기 목록 2건이 세트에 들어갔는가",
+                stored_articles == ["1", "32의2"]
+                and stored_set.items[0].law_id == "law-999"
+                and stored_set.items[0].underline_color_name == "초록"
+                and stored_set.items[1].underline_phrases == ("가지번호",),
+                str(stored_articles),
+            )
+            with patch("ui.input_view.messagebox.showinfo", side_effect=_capture_queue_info):
+                view._add_waiting_jobs_to_capture_memory()
+            all_passed &= report(
+                "같은 작업을 다시 넣으면 건너뛰는가",
+                bool(queue_messages) and "이미 있던 2건은 건너뛰었습니다" in queue_messages[-1],
+                queue_messages[-1] if queue_messages else "",
+            )
+
+            settings_dialog = CaptureSetMemoryDialog(window, view._controller)
+            window.update()
+            dialog_labels = [read_text_option(widget) for widget in iter_widgets(settings_dialog)]
+            all_passed &= report(
+                "설정 창에 법령 검색 칸이 없는가",
+                "검색" not in dialog_labels and "이 조문을 세트에 추가" not in dialog_labels,
+            )
+            all_passed &= report("설정 창에 수정 저장이 있는가", "수정 저장" in dialog_labels)
+            settings_dialog._close()
+
+            view._jobs.clear()
+            view._job_listbox.delete(0, tk.END)
+            for saved_job in saved_jobs:
+                view._append_job_to_list(saved_job)
+        finally:
+            app_config.CAPTURE_SET_MEMORY_FILE_PATH = saved_memory_path
+            view._refresh_capture_memory_picker()
+
 print("\n=== 3-5. Ctrl+F 찾기 ===")
 preview = view.preview_view
 all_passed &= report(
@@ -249,6 +481,44 @@ all_passed &= report(
 preview._hide_find_bar()
 window.update()
 all_passed &= report("닫으면 막대가 숨겨지는가", not preview._is_find_bar_visible)
+
+all_passed &= report(
+    "찾기 왼쪽에 ▲▼ 버튼이 있는가",
+    preview._article_up_button.cget("text") == "▲"
+    and preview._article_down_button.cget("text") == "▼"
+    and preview._article_up_button.winfo_rootx()
+    < preview._article_down_button.winfo_rootx()
+    < preview._find_button.winfo_rootx(),
+)
+saved_preview_text = preview._text_box.get("1.0", "end-1c")
+preview.show_article(
+    "전체",
+    "제12조(목적) 가나다\n\n제13조(정의) 라마바\n\n제14조(적용) 사아자",
+    is_full_view=True,
+)
+window.update()
+moved_article, did_scroll = preview.reveal_adjacent_article(1)
+all_passed &= report(
+    "전체보기에서 아래는 다음 조로 가는가",
+    did_scroll and moved_article == ArticleNumber(13),
+    str(moved_article),
+)
+moved_again, did_scroll_again = preview.reveal_adjacent_article(1)
+all_passed &= report(
+    "한 번 더 아래는 그다음 조인가",
+    did_scroll_again and moved_again == ArticleNumber(14),
+    str(moved_again),
+)
+preview.show_article("제12조", "제12조(목적) 가나다", is_full_view=False)
+window.update()
+one_article, did_scroll_one = preview.reveal_adjacent_article(1)
+all_passed &= report(
+    "조문 하나만 있으면 본문 밖 이동으로 보는가",
+    (not did_scroll_one) and one_article == ArticleNumber(12),
+    str(one_article),
+)
+preview.show_article("제7조", saved_preview_text)
+window.update()
 
 print("\n=== 3-5b. 빨간 표시 클릭으로 밑줄 취소 ===")
 preview.show_article("제7조", sample_article)
@@ -336,10 +606,52 @@ except ValueError as error:
 set_entry(view._article_entry, "1")
 view._reset_underline_phrases()
 try:
-    view._build_job_from_inputs()
-    all_passed &= report("밑줄 문구가 비면 막는가", False)
+    empty_underline_job = view._build_job_from_inputs()
+    all_passed &= report(
+        "밑줄 없이도 작업을 만들 수 있는가",
+        len(empty_underline_job.underline_phrases) == 0,
+        str(empty_underline_job.underline_phrases),
+    )
 except ValueError as error:
-    all_passed &= report("밑줄 문구가 비면 막는가", True, str(error))
+    all_passed &= report("밑줄 없이도 작업을 만들 수 있는가", False, str(error))
+
+print("\n=== 밑줄 없이 실행 확인 대화상자 ===")
+# 밑줄 0건 작업을 목록에 넣고, [실행] 시 확인창에서 '아니오'면 시작하지 않는다.
+view._jobs.clear()
+view._job_listbox.delete(0, tk.END)
+view._add_job()
+window.update()
+all_passed &= report("밑줄 0건 작업이 목록에 담기는가", len(view._jobs) == 1)
+
+start_calls: list = []
+view._on_start_requested = lambda jobs: start_calls.append(list(jobs))
+
+from unittest.mock import patch
+
+with patch("ui.input_view.messagebox.askyesno", return_value=False) as mocked_ask:
+    view._request_start()
+window.update()
+all_passed &= report(
+    "밑줄 없을 때 확인창을 띄우는가",
+    mocked_ask.called,
+)
+all_passed &= report(
+    "확인에서 아니오를 고르면 실행하지 않는가",
+    start_calls == [],
+)
+
+with patch("ui.input_view.messagebox.askyesno", return_value=True):
+    view._request_start()
+window.update()
+all_passed &= report(
+    "확인에서 예 를 고르면 실행하는가",
+    len(start_calls) == 1 and start_calls[0][0].underline_phrases == [],
+)
+
+# 이후 시나리오를 위해 목록을 비운다.
+view._jobs.clear()
+view._job_listbox.delete(0, tk.END)
+view._update_figure_count()
 
 print("\n=== 5. 조건 담기 ===")
 set_entry(view._article_entry, "1")
@@ -384,6 +696,15 @@ all_passed &= report(
 )
 
 print("\n=== 6. 목록에서 빼기 ===")
+view._job_listbox.selection_clear(0, tk.END)
+view._job_listbox.selection_set(0)
+view._job_listbox.selection_set(1)
+all_passed &= report(
+    "대기 목록에서 여러 줄을 고를 수 있는가",
+    list(view._job_listbox.curselection()) == [0, 1],
+    str(list(view._job_listbox.curselection())),
+)
+view._job_listbox.selection_clear(0, tk.END)
 view._job_listbox.selection_set(0)
 view._remove_selected_job()
 window.update()
@@ -482,6 +803,16 @@ window.update()
 all_passed &= report(
     "개정본 목록 위 휠은 창을 안 움직이는가",
     window._scroll_canvas.yview() == main_before_list,
+)
+version_canvas.yview_moveto(0)
+window.update()
+window._on_mousewheel(_FakeWheel(120, version_canvas))
+window.update()
+top_fraction = version_canvas.yview()[0]
+all_passed &= report(
+    "개정본 목록은 맨 위 항목보다 위로 안 올라가는가",
+    top_fraction >= 0,
+    str(top_fraction),
 )
 
 # 예전 버그: 목록 Leave 때 unbind_all 하면 창 휠이 죽었다.

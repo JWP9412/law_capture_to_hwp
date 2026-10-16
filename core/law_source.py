@@ -208,6 +208,16 @@ def _normalize_law_name(name: str) -> str:
     return WHITESPACE_IN_NAME_PATTERN.sub("", name)
 
 
+def law_names_differ_beyond_spacing(left: str, right: str) -> bool:
+    """
+    두 법령 이름이 띄어쓰기를 지워도 다른지 본다.
+
+    옛 법령은 이름을 붙여 썼다. 띄어쓰기만 다르면 개명이 아니므로
+    안내 창을 띄우지 않는다. 세트에 저장한 이름과 지금 이름을 견줄 때 쓴다.
+    """
+    return _normalize_law_name(left) != _normalize_law_name(right)
+
+
 def _search_within_one_kind(query: str, kind: LawSourceKind) -> list[LawSearchResult]:
     """한 갈래(행정규칙 또는 법령) 안에서만 검색한다."""
     try:

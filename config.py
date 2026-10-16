@@ -14,7 +14,7 @@ from pathlib import Path
 # 프로그램 버전
 # ---------------------------------------------------------------------------
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
 # ---------------------------------------------------------------------------
 # 폴더 위치
@@ -27,6 +27,10 @@ LOG_DIRECTORY = PROJECT_ROOT / "logs"
 # 자주 쓰는 법령·고시 즐겨찾기. 프로그램이 직접 읽고 쓰는 사용자 파일이다.
 # (개정본 번호는 넣지 않는다 — 개정될 때마다 바뀌어 깨지기 때문이다)
 FAVORITES_FILE_PATH = PROJECT_ROOT / "user_favorites.json"
+
+# 자주 쓰는 캡처 묶음(사용자 지정 SET). 법령·조문·밑줄만 기억하고
+# 시행 시점은 담을 때마다 고른다. 개정본 번호는 넣지 않는다.
+CAPTURE_SET_MEMORY_FILE_PATH = PROJECT_ROOT / "user_capture_set_memory.json"
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +106,55 @@ SHOW_BROWSER_WINDOW = False
 # 밑줄·캡처 (PDF → 그림)
 # ---------------------------------------------------------------------------
 
-UNDERLINE_COLOR = (1.0, 0.0, 0.0)  # 빨강 (PyMuPDF 0~1)
+# 화면에서 고를 수 있는 밑줄 색. 이름은 그대로 Combobox 에 보인다.
+# RGB 는 PyMuPDF draw_line 이 받는 0~1 값이다.
+UNDERLINE_COLOR_CHOICES: list[tuple[str, tuple[float, float, float]]] = [
+    ("빨강", (1.0, 0.0, 0.0)),
+    ("파랑", (0.0, 0.2, 0.9)),
+    ("초록", (0.0, 0.55, 0.0)),
+    ("주황", (1.0, 0.45, 0.0)),
+    ("검정", (0.0, 0.0, 0.0)),
+]
+DEFAULT_UNDERLINE_COLOR_NAME = "빨강"
+UNDERLINE_COLOR = dict(UNDERLINE_COLOR_CHOICES)[DEFAULT_UNDERLINE_COLOR_NAME]
 UNDERLINE_THICKNESS_IN_POINTS = 2.0
 UNDERLINE_GAP_BELOW_TEXT_IN_POINTS = 1.2
+
+# 미리보기에서 고른 문구를 칠하는 형광펜 색 (tk Text background용 #RRGGBB).
+# PDF 밑줄 색과 짝을 맞춰, 사용자가 고른 색이 미리보기에서도 보이게 한다.
+PREVIEW_HIGHLIGHT_BY_COLOR_NAME: dict[str, str] = {
+    "빨강": "#ffe0e0",
+    "파랑": "#d6e4ff",
+    "초록": "#d4f0d4",
+    "주황": "#ffe4c4",
+    "검정": "#e0e0e0",
+}
+
+
+def underline_color_for_name(color_name: str) -> tuple[float, float, float]:
+    """
+    화면에서 고른 색 이름을 PyMuPDF RGB 로 바꾼다.
+
+    모르는 이름이 들어오면 기본(빨강)을 쓴다.
+    (설정 파일이 바뀌거나 옛 값이 남아 있어도 프로그램이 멈추지 않게)
+    """
+    for name, rgb in UNDERLINE_COLOR_CHOICES:
+        if name == color_name:
+            return rgb
+    return UNDERLINE_COLOR
+
+
+def preview_highlight_for_name(color_name: str) -> str:
+    """
+    미리보기 형광펜(#RRGGBB)을 밑줄 색 이름에 맞춰 돌려준다.
+
+    모르는 이름이면 빨강용 형광펜을 쓴다.
+    """
+    return PREVIEW_HIGHLIGHT_BY_COLOR_NAME.get(
+        color_name,
+        PREVIEW_HIGHLIGHT_BY_COLOR_NAME[DEFAULT_UNDERLINE_COLOR_NAME],
+    )
+
 
 CAPTURE_RESOLUTION_IN_DPI = 300
 CAPTURE_PADDING_IN_POINTS = 8

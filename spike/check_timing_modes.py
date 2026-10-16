@@ -12,8 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import date
+
 from ui.app_window import AppWindow
-from ui.input_view import ALL_TIME_MODE, PERIOD_MODE, SINGLE_DATE_MODE
+from ui.input_view import ALL_TIME_MODE, PERIOD_MODE, SINGLE_DATE_MODE, _parse_date
 
 
 def report(label: str, is_ok: bool, detail: str = "") -> bool:
@@ -39,6 +41,25 @@ window = AppWindow()
 window.update()
 view = window._input_view
 all_passed = True
+
+print("=== 0. 날짜 적기 ===")
+expected_day = date(2025, 6, 1)
+for written in (
+    "2025-06-01",
+    "2025/6/1",
+    "2025.06.01.",
+    "2025. 6. 1.",
+    "25.6.1.",
+    "25/06/01",
+    "20250601",
+    "2025년 6월 1일",
+):
+    parsed = _parse_date(written, "기준일")
+    all_passed &= report(f"{written} → 2025-06-01", parsed == expected_day, str(parsed))
+all_passed &= report(
+    "73.1.1. 은 1973년",
+    _parse_date("73.1.1.", "기준일") == date(1973, 1, 1),
+)
 
 print("=== 1. 특정 시점 하나 — 칸 레이아웃 ===")
 view._mode.set(SINGLE_DATE_MODE)
@@ -111,8 +132,8 @@ window.update()
 period_count = len(view._version_checkboxes)
 all_passed &= report("기간 안 개정본", period_count == 2, f"{period_count}개")
 all_passed &= report(
-    "기간 모드는 처음부터 전부 켜져 있는가",
-    all(is_on.get() for is_on, _ in view._version_checkboxes),
+    "기간 모드도 처음엔 전부 꺼져 있는가 (사용자 결정: 모든 모드가 전부 해제로 시작)",
+    period_count > 0 and not any(is_on.get() for is_on, _ in view._version_checkboxes),
 )
 
 print("\n=== 4. 전체 기간 — 주택법 ===")

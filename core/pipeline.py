@@ -129,7 +129,10 @@ def _capture_one_article(
 
     first_image_path = working_directory / f"{pdf_path.stem}.png"
     image_paths = annotate.underline_and_capture(
-        pdf_path, task.underline_phrases, first_image_path
+        pdf_path,
+        task.underline_phrases,
+        first_image_path,
+        underline_color=task.underline_color,
     )
 
     body_text = annotate.extract_article_body_text(pdf_path)
