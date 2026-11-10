@@ -1,0 +1,43 @@
+{
+  "unknown_contractor_name": "시공사_미확인",
+  "unknown_stage_name": "단계_미확인",
+  "unknown_document_kind_name": "기타",
+  "contractors": [
+    {
+      "name": "예시건설",
+      "keywords": ["예시건설"]
+    }
+  ],
+  "stages": [
+    {"name": "소장", "keywords": ["소장"]},
+    {"name": "답변서", "keywords": ["답변서"]},
+    {"name": "준비서면", "keywords": ["준비서면"]},
+    {"name": "감정", "keywords": ["감정신청", "감정보고", "감정서", "감정"]},
+    {"name": "의견서", "keywords": ["의견서"]},
+    {"name": "조정", "keywords": ["조정"]},
+    {"name": "변론", "keywords": ["변론"]},
+    {"name": "판결", "keywords": ["판결", "선고"]}
+  ],
+  "document_kinds": [
+    {
+      "name": "감정서",
+      "keywords": ["감정보고서", "감정보고", "감정서"],
+      "extensions": []
+    },
+    {
+      "name": "도면",
+      "keywords": ["평면도", "입면도", "단면도", "배치도", "도면"],
+      "extensions": [".dwg", ".dxf", ".dwf"]
+    },
+    {
+      "name": "의견서",
+      "keywords": ["의견서"],
+      "extensions": []
+    },
+    {
+      "name": "엑셀",
+      "keywords": [],
+      "extensions": [".xls", ".xlsx", ".xlsm", ".csv"]
+    }
+  ]
+}
