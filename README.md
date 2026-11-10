@@ -1,4 +1,4 @@
-# 법령 조문 캡처 (law_capture) v2.0.0
+# 법령 조문 캡처 (law_capture) v2.1.0
 
 국가법령정보센터에서 **사건 시점에 시행 중이던** 법령·고시 조문을 찾아,
 쟁점 문구에 빨간 밑줄을 긋고, 그림으로 잘라 **한글 문서**에 넣어 주는 프로그램입니다.
@@ -197,7 +197,7 @@ python run_from_command_line.py --name 하자판정기준 --from 2024-01-01 --to
 
 | 값 | 기본값 | 설명 |
 |---|---|---|
-| `APP_VERSION` | `2.0.0` | 프로그램 버전 |
+| `APP_VERSION` | `2.1.0` | 프로그램 버전 |
 | `UNDERLINE_COLOR` | 빨강 `(1,0,0)` | 기본 밑줄 색 (화면에서 바꿀 수 있음) |
 | `UNDERLINE_THICKNESS_IN_POINTS` | 2.0 | 밑줄 두께 |
 | `UNDERLINE_GAP_BELOW_TEXT_IN_POINTS` | 1.2 | 글자 아래에서 얼마나 내려 그을지 |
@@ -236,9 +236,10 @@ python run_from_command_line.py --name 하자판정기준 --from 2024-01-01 --to
 
 | 문서 | 내용 |
 |---|---|
-| [00.README/README_v2.0.0.md](00.README/README_v2.0.0.md) | 이 버전의 사용 설명 (보관본) |
-| [00.CHANGELOG/CHANGELOG_v2.0.0.md](00.CHANGELOG/CHANGELOG_v2.0.0.md) | 변경 이력 |
-| [00.PROJECT_STRUCTURE/PROJECT_STRUCTURE_v2.0.0.md](00.PROJECT_STRUCTURE/PROJECT_STRUCTURE_v2.0.0.md) | 폴더·파일 구조 |
+| [00.README/README_v2.1.0.md](00.README/README_v2.1.0.md) | 이 버전의 사용 설명 (보관본) |
+| [00.CHANGELOG/CHANGELOG_v2.1.0.md](00.CHANGELOG/CHANGELOG_v2.1.0.md) | 변경 이력 |
+| [00.PROJECT_STRUCTURE/PROJECT_STRUCTURE_v2.1.0.md](00.PROJECT_STRUCTURE/PROJECT_STRUCTURE_v2.1.0.md) | 폴더·파일 구조 |
+| [00.README/README_v2.0.0.md](00.README/README_v2.0.0.md) | 이전 버전 보관본 |
 | [00.README/README_v1.0.0.md](00.README/README_v1.0.0.md) | 이전 버전 보관본 |
 | [인수인계.md](인수인계.md) | 개발·유지보수 인수인계 |
 | [설치목록.md](설치목록.md) | 설치·다운로드 기록 |
