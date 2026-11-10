@@ -79,6 +79,54 @@ def _open(request, purpose: str) -> str:
     raise LawSiteStructureChangedError(purpose) from last_error
 
 
+# 공개 API 가 "결과가 없다"가 아니라 "이 요청은 막혔다"고 돌려주는 문구.
+# 이걸 빈 검색으로 넘기면 화면이 '법령을 못 찾았다'고 잘못 말한다.
+OPEN_API_REJECTION_MARKERS = (
+    "사용자 정보 검증에 실패",
+    "필수입력요소 검증에 실패",
+)
+
+
+def _raise_if_open_api_rejected(response_text: str, purpose: str) -> None:
+    """
+    공개 API 가 인증·필수값 문제로 거절한 응답인지 본다.
+
+    왜 여기서 막는가:
+      거절 응답도 XML/JSON 이라 파싱 자체는 성공한다.
+      항목이 0건이라서 '법령을 못 찾음'으로 넘어가면, 사용자는
+      이름을 잘못 넣은 줄 알고 헤맨다. 통로가 막힌 것으로 올려야
+      예비 수단(한글 주소 검색)으로 넘어가거나 안내가 정확해진다.
+    """
+    for marker in OPEN_API_REJECTION_MARKERS:
+        if marker in response_text:
+            raise LawSiteStructureChangedError(purpose)
+
+
+def _request_open_api_by_post(path: str, parameters: dict, purpose: str) -> str:
+    """
+    공개 API 에 값을 담아 POST 로 물어본다.
+
+    왜 GET 이 아니라 POST 인가:
+      예전에는 주소를 길게 이어 붙이는 GET 방식을 썼다.
+      그런데 법제처가 GET XML 요청에는 '등록된 PC 주소만 허용'으로
+      막아 두었다. 같은 값으로 POST 하면 검색·조문 조회가 된다.
+      개정 이력을 받아올 때 쓰던 request_data 와 같은 보내는 방식이다.
+    """
+    url = f"{config.LAW_SITE_BASE_URL}{path}"
+    request = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(parameters).encode("utf-8"),
+        headers={
+            **BROWSER_LIKE_HEADERS,
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Referer": config.LAW_SITE_BASE_URL,
+        },
+    )
+    response_text = _open(request, purpose)
+    _raise_if_open_api_rejected(response_text, purpose)
+    return response_text
+
+
 def request_open_api_search(search_target: str, query: str, max_results: int) -> str:
     """
     공개 API 로 법령·고시를 검색한다.
@@ -94,9 +142,9 @@ def request_open_api_search(search_target: str, query: str, max_results: int) ->
         "query": query,
         "display": str(max_results),
     }
-    url = f"{config.LAW_SITE_BASE_URL}{OPEN_API_SEARCH_PATH}?{urllib.parse.urlencode(parameters)}"
-    request = urllib.request.Request(url, headers=BROWSER_LIKE_HEADERS)
-    return _open(request, f"'{query}' 검색")
+    return _request_open_api_by_post(
+        OPEN_API_SEARCH_PATH, parameters, f"'{query}' 검색"
+    )
 
 
 def request_open_api_article(
@@ -121,9 +169,9 @@ def request_open_api_article(
     if article_code:
         parameters["JO"] = article_code
 
-    url = f"{config.LAW_SITE_BASE_URL}{OPEN_API_ARTICLE_PATH}?{urllib.parse.urlencode(parameters)}"
-    request = urllib.request.Request(url, headers=BROWSER_LIKE_HEADERS)
-    return _open(request, "조문 내용 조회")
+    return _request_open_api_by_post(
+        OPEN_API_ARTICLE_PATH, parameters, "조문 내용 조회"
+    )
 
 
 def request_page_by_korean_url(category: str, law_name: str) -> str:
