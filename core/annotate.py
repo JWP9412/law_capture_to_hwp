@@ -60,6 +60,7 @@ def underline_and_capture(
     underline_phrases: list[str],
     first_image_path: Path,
     underline_color: tuple[float, float, float] | None = None,
+    underline_phrase_colors: dict[str, tuple[float, float, float]] | None = None,
 ) -> list[Path]:
     """
     PDF 에 밑줄을 긋고 본문 부분만 그림으로 잘라낸다. 쪽마다 그림 하나씩 만든다.
@@ -79,17 +80,24 @@ def underline_and_capture(
     (사용자가 밑줄 없이 조문만 넣고 싶을 때)
 
     underline_color 를 안 주면 config 기본(빨강)을 쓴다.
+    underline_phrase_colors 에 문구별 색이 있으면 그 색을 쓰고,
+    없는 문구만 underline_color 를 쓴다.
 
     돌려주는 것은 만들어진 그림들의 목록이다. 한 쪽이면 하나만 들어있다.
     """
     color_to_use = (
         underline_color if underline_color is not None else config.UNDERLINE_COLOR
     )
+    phrase_colors = underline_phrase_colors or {}
     document = fitz.open(pdf_path)
     try:
         if underline_phrases:
             _draw_underlines_on_all_pages(
-                document, underline_phrases, pdf_path, color_to_use
+                document,
+                underline_phrases,
+                pdf_path,
+                color_to_use,
+                phrase_colors,
             )
         return _capture_all_pages(document, first_image_path, pdf_path)
     finally:
@@ -101,10 +109,12 @@ def _draw_underlines_on_all_pages(
     underline_phrases: list[str],
     pdf_path: Path,
     underline_color: tuple[float, float, float],
+    phrase_colors: dict[str, tuple[float, float, float]],
 ) -> None:
     """문구마다 모든 쪽을 뒤져 밑줄을 긋는다. 어느 쪽에도 없으면 오류를 낸다."""
     for phrase in underline_phrases:
         phrase_text, occurrence_index = _parse_occurrence_marker(phrase)
+        color_for_phrase = phrase_colors.get(phrase, underline_color)
         was_found_somewhere = False
         seen_count = 0
 
@@ -114,7 +124,9 @@ def _draw_underlines_on_all_pages(
                 # 순번이 없으면 전부 긋고, 있으면 그 순번만 긋는다.
                 if occurrence_index is None or seen_count == occurrence_index:
                     for text_area in areas:
-                        _draw_underline_below_text(page, text_area, underline_color)
+                        _draw_underline_below_text(
+                            page, text_area, color_for_phrase
+                        )
                     was_found_somewhere = True
 
         if not was_found_somewhere:

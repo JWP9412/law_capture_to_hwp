@@ -43,7 +43,11 @@ TEXT_SECONDARY = "#464c53"
 
 # 주 강조: 사이트 [화면내 검색] 버튼 진남색 / 로고·제목 남색
 ACCENT_BLUE = "#063a74"
+# 마우스 올림(hover). 사이트 제목 남색 — normal(#063a74)보다 한 단계 진하다.
 ACCENT_BLUE_ACTIVE = "#001e4e"
+# 누르고 있는 동안(pressed). active 와 같으면 눌림이 안 보이므로
+# 같은 남색 계열에서 더 어둡게(#000814) 둔다. (법령정보센터 팔레트 유지)
+ACCENT_BLUE_PRESSED = "#000814"
 BRAND_NAVY = "#001e4e"
 # 링크·개정 표시·선택 상자 테두리 (사이트 파랑)
 LINK_BLUE = "#2b6ad1"
@@ -51,6 +55,11 @@ LINK_BLUE = "#2b6ad1"
 BUTTON_BORDER = "#b1b8be"
 HOVER_BACKGROUND = "#f8f9fb"
 SELECTED_BACKGROUND = "#e2eaf7"
+# 흰 버튼·토글을 누를 때 바탕. hover(#f8f9fb)·창바탕(#eef2f7)과
+# 확실히 구분되도록 한 단계 더 회색으로 둔다.
+BUTTON_PRESSED_BACKGROUND = "#d5dbe3"
+# 누를 때 테두리 — 회색 테두리만 바꾸면 잘 안 보여 진남으로 강조.
+BUTTON_PRESSED_BORDER = "#063a74"
 BUTTON_DISABLED_BACKGROUND = "#d1d5db"
 BUTTON_DISABLED_BORDER = "#c4cbd6"
 
@@ -234,18 +243,20 @@ def _register_rounded_buttons(style: ttk.Style, root) -> None:
     글자(label)는 그대로 두어 버튼 글씨가 보이게 한다.
     """
     # --- 보조(흰) 버튼: 사이트 [파일저장]·[프린트] 버튼 ---
+    # pressed 는 hover(#f8f9fb)·창바탕(#eef2f7)보다 진한 회색 + 진남 테두리.
+    # 그래야 짧게 눌러도 '눌렸다'는 게 눈으로 바로 보인다.
     secondary = make_state_images(
         root,
         fill_by_state={
             "normal": CARD_BACKGROUND,
             "active": HOVER_BACKGROUND,
-            "pressed": WINDOW_BACKGROUND,
+            "pressed": BUTTON_PRESSED_BACKGROUND,
             "disabled": BUTTON_DISABLED_BACKGROUND,
         },
         border_by_state={
             "normal": BUTTON_BORDER,
             "active": BUTTON_BORDER,
-            "pressed": BUTTON_BORDER,
+            "pressed": BUTTON_PRESSED_BORDER,
             "disabled": BUTTON_DISABLED_BORDER,
         },
         corner_radius=BUTTON_CORNER_RADIUS,
@@ -282,28 +293,36 @@ def _register_rounded_buttons(style: ttk.Style, root) -> None:
         padding=(12, 6),
         font=body_font(10),
     )
+    # style.map 에도 pressed 를 명시한다. 글자색·배경은 그림 요소가
+    # 주로 담당하지만, clam 이 label 쪽 배경을 다시 칠할 때를 대비한다.
     style.map(
         "TButton",
         foreground=[
             ("disabled", TEXT_HINT),
             ("!disabled", TEXT_PRIMARY),
         ],
-        background=[("active", HOVER_BACKGROUND)],
+        background=[
+            ("disabled", BUTTON_DISABLED_BACKGROUND),
+            ("pressed", BUTTON_PRESSED_BACKGROUND),
+            ("active", HOVER_BACKGROUND),
+        ],
     )
 
     # --- 주(진남) 버튼: 사이트 [화면내 검색] 버튼 ---
+    # normal=#063a74 → active(hover)=#001e4e → pressed=#000814
+    # 세 단계가 분명해야 올리고/누르는 느낌이 구분된다.
     primary = make_state_images(
         root,
         fill_by_state={
             "normal": ACCENT_BLUE,
             "active": ACCENT_BLUE_ACTIVE,
-            "pressed": ACCENT_BLUE_ACTIVE,
+            "pressed": ACCENT_BLUE_PRESSED,
             "disabled": BUTTON_DISABLED_BACKGROUND,
         },
         border_by_state={
             "normal": ACCENT_BLUE,
             "active": ACCENT_BLUE_ACTIVE,
-            "pressed": ACCENT_BLUE_ACTIVE,
+            "pressed": ACCENT_BLUE_PRESSED,
             "disabled": BUTTON_DISABLED_BORDER,
         },
         corner_radius=BUTTON_CORNER_RADIUS,
@@ -348,7 +367,7 @@ def _register_rounded_buttons(style: ttk.Style, root) -> None:
         ],
         background=[
             ("disabled", BUTTON_DISABLED_BACKGROUND),
-            ("pressed", ACCENT_BLUE_ACTIVE),
+            ("pressed", ACCENT_BLUE_PRESSED),
             ("active", ACCENT_BLUE_ACTIVE),
         ],
     )
@@ -513,20 +532,22 @@ def _register_rounded_toggle(style: ttk.Style, root) -> None:
     indicatoron=False 처럼 글자만 보이는 단추로 쓰므로
     indicator 요소는 빼고 border+label 만 둔다.
     """
+    # 토글도 흰 버튼과 같이 pressed 를 진한 회색+진남 테두리로 둔다.
+    # (selected 와 겹칠 때는 rounded_shapes 가 pressed 를 먼저 매칭)
     toggle = make_state_images(
         root,
         fill_by_state={
             "normal": CARD_BACKGROUND,
             "active": HOVER_BACKGROUND,
             "selected": SELECTED_BACKGROUND,
-            "pressed": WINDOW_BACKGROUND,
+            "pressed": BUTTON_PRESSED_BACKGROUND,
             "disabled": BUTTON_DISABLED_BACKGROUND,
         },
         border_by_state={
             "normal": BUTTON_BORDER,
             "active": BUTTON_BORDER,
             "selected": LINK_BLUE,
-            "pressed": BUTTON_BORDER,
+            "pressed": BUTTON_PRESSED_BORDER,
             "disabled": BUTTON_DISABLED_BORDER,
         },
         corner_radius=BUTTON_CORNER_RADIUS,
@@ -573,6 +594,8 @@ def _register_rounded_toggle(style: ttk.Style, root) -> None:
             ("!selected", TEXT_PRIMARY),
         ],
         background=[
+            ("disabled", BUTTON_DISABLED_BACKGROUND),
+            ("pressed", BUTTON_PRESSED_BACKGROUND),
             ("selected", SELECTED_BACKGROUND),
             ("active", HOVER_BACKGROUND),
         ],

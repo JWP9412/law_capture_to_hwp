@@ -49,7 +49,12 @@ from core.pipeline import WorkStage
 
 @dataclass
 class ProgressUpdate:
-    """작업 하나가 끝날 때마다 화면으로 보내는 소식."""
+    """
+    작업 진행을 화면으로 보내는 소식.
+
+    완료/실패뿐 아니라 '조문 내려받는 중' 같은 중간 단계도 보낸다.
+    그래야 진행 기록 칸이 캡처 도중에 비어 보이지 않는다.
+    """
 
     finished_count: int
     total_count: int
@@ -60,6 +65,11 @@ class ProgressUpdate:
     @property
     def is_failure(self) -> bool:
         return self.stage is WorkStage.FAILED
+
+    @property
+    def is_item_done(self) -> bool:
+        """이 소식이 '조문 하나 처리가 끝남' 인지. 중간 단계면 False."""
+        return self.stage in (WorkStage.FINISHED, WorkStage.FAILED)
 
 
 @dataclass
@@ -373,9 +383,16 @@ class LawCaptureController:
     def _report_progress(
         self, task_index: int, total_count: int, task, stage: WorkStage, detail: str
     ) -> None:
+        # 중간 단계에서는 '끝난 건수'를 아직 올리지 않는다.
+        # (올리면 진행 막대가 조문을 받기 전에 이미 앞으로 가 버린다)
+        finished_count = (
+            task_index
+            if stage in (WorkStage.FINISHED, WorkStage.FAILED)
+            else max(task_index - 1, 0)
+        )
         self._message_queue.put(
             ProgressUpdate(
-                finished_count=task_index,
+                finished_count=finished_count,
                 total_count=total_count,
                 description=str(task),
                 stage=stage,

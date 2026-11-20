@@ -19,13 +19,24 @@ from core.article_number import (
     find_article_covering_character_offset,
     read_article_heading,
 )
+from config import (
+    DEFAULT_UNDERLINE_COLOR_NAME,
+    PREVIEW_HIGHLIGHT_BY_COLOR_NAME,
+    UNDERLINE_COLOR_CHOICES,
+)
 from core.models import LawVersion
 from ui import theme
 from ui.widgets import RoundedCardShell
 
-SELECTED_PHRASE_TAG = "고른부분"
-# 기본은 빨강용 옅은 형광펜. 밑줄 색을 바꾸면 set_selected_highlight_color 로 맞춘다.
+SELECTED_PHRASE_TAG_PREFIX = "고른부분"
+# 기본은 빨강용 옅은 형광펜. 색마다 태그를 따로 두어, 이미 고른 구간은
+# Combobox 를 바꿔도 색이 따라가지 않게 한다.
 SELECTED_PHRASE_BACKGROUND = "#ffe0e0"
+
+
+def _selected_tag_for_color(color_name: str) -> str:
+    """밑줄 색 이름에 대응하는 미리보기 형광펜 태그 이름."""
+    return f"{SELECTED_PHRASE_TAG_PREFIX}:{color_name}"
 
 # 찾기(Ctrl+F)로 맞춘 곳. 고른 부분(옅은 빨강)과 색을 다르게 해 헷갈리지 않게 한다.
 FOUND_TAG = "찾은곳"
@@ -54,12 +65,12 @@ GUIDE_WHILE_LOADING = "조문을 불러오는 중입니다…"
 GUIDE_AFTER_LOADING = (
     "밑줄 칠 부분을 마우스로 드래그하세요. 여러 번 고를 수 있습니다. "
     "(찾기 또는 Ctrl+F) "
-    "빨간 표시를 클릭하면 그 밑줄을 취소합니다."
+    "표시를 왼쪽 클릭하면 지워지고, 오른쪽 클릭하면 색을 바꿀 수 있습니다."
 )
 GUIDE_AFTER_FULL_LOADING = (
     "전체보기입니다. 드래그하면 밑줄 문구와 조문 번호가 함께 채워집니다. "
     "(본문 글자만 표시 · 찾기 또는 Ctrl+F · 표·별표는 [원문 보기]) "
-    "빨간 표시를 클릭하면 그 밑줄을 취소합니다."
+    "표시를 왼쪽 클릭하면 지워지고, 오른쪽 클릭하면 색을 바꿀 수 있습니다."
 )
 
 
@@ -87,6 +98,8 @@ class PreviewView(RoundedCardShell):
         self._on_open_original = on_open_original
         # 빨간 표시를 클릭해 지울 때 왼쪽 칩 목록도 같이 빼기 위한 알림.
         self._on_phrase_removed = on_phrase_removed
+        # 이미 고른 구간의 색을 메뉴로 바꿨을 때 왼쪽 목록 색도 맞추기 위한 알림.
+        self._on_phrase_color_changed: Callable[[str, str], None] | None = None
         # 위/아래 버튼. 입력 화면이 조문 칸과 미리보기를 같이 바꾸도록 연결한다.
         self._on_move_article: Callable[[int], None] | None = None
         # 본문이 칸보다 짧으면 스크롤해도 화면 맨 위 조가 안 바뀐다.
@@ -95,22 +108,25 @@ class PreviewView(RoundedCardShell):
         self._shown_versions: list[LawVersion] = []
         # 전체보기일 때만 드래그로 조문 번호를 자동 채운다.
         self._is_full_view_mode = False
+        # 다음에 드래그할 때 쓸 밑줄 색 이름. Combobox 와 맞춘다.
+        self._pending_color_name = DEFAULT_UNDERLINE_COLOR_NAME
 
         # 찾기 결과. 각 항목은 (시작 인덱스, 끝 인덱스) 문자열이다.
         self._found_ranges: list[tuple[str, str]] = []
         self._current_found_index = -1
         self._is_find_bar_visible = False
 
-        # 드래그로 고른 밑줄. (시작, 끝, 칩에 넣은 문구 라벨)
-        # 빨간 표시 클릭 삭제·칩 X 동기화에 쓴다.
-        self._selected_phrase_ranges: list[tuple[str, str, str]] = []
-        # 클릭과 드래그를 구분한다. 버튼 누른 자리와 뗀 자리가 거의 같으면 클릭.
-        self._pointer_press_index: str | None = None
+        # 드래그로 고른 밑줄. (시작, 끝, 칩 문구 라벨, 색 이름)
+        # 왼쪽 클릭 삭제·오른쪽 클릭 메뉴·칩 X 동기화에 쓴다.
+        self._selected_phrase_ranges: list[tuple[str, str, str, str]] = []
+        # 왼쪽 버튼: 누른 자리와 뗀 자리가 같으면 '클릭', 다르면 '드래그'.
+        self._left_press_index: str | None = None
 
         self._build_header_row()
         self._build_find_bar()
         self._build_text_area()
         self._build_guide_label()
+        self._configure_all_color_tags()
 
     # ------------------------------------------------------------------
     # 화면 구성
@@ -215,9 +231,6 @@ class PreviewView(RoundedCardShell):
         self._text_box.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        self._text_box.tag_configure(
-            SELECTED_PHRASE_TAG, background=SELECTED_PHRASE_BACKGROUND
-        )
         self._text_box.tag_configure(FOUND_TAG, background=FOUND_BACKGROUND)
         self._text_box.tag_configure(
             CURRENT_FOUND_TAG, background=CURRENT_FOUND_BACKGROUND
@@ -231,9 +244,14 @@ class PreviewView(RoundedCardShell):
             foreground=theme.LINK_BLUE,
             font=theme.body_font(9),
         )
-        # 누른 위치와 뗀 위치로 클릭(밑줄 취소) / 드래그(밑줄 추가)를 나눈다.
-        self._text_box.bind("<ButtonPress-1>", self._on_pointer_pressed)
-        self._text_box.bind("<ButtonRelease-1>", self._on_pointer_released)
+        # 왼쪽 드래그 = 밑줄 추가, 왼쪽 클릭(표시 위) = 지우기,
+        # 오른쪽 클릭 = 색 바꾸기 메뉴.
+        self._text_box.bind("<ButtonPress-1>", self._on_left_press)
+        self._text_box.bind("<ButtonRelease-1>", self._on_left_release)
+        self._text_box.bind("<ButtonRelease-3>", self._on_right_click_phrase)
+        # Text 태그에는 cursor 옵션이 없어서, 움직임으로 손가락/글자 커서를 바꾼다.
+        self._text_box.bind("<Motion>", self._on_text_pointer_motion)
+        self._text_box.bind("<Leave>", self._on_text_pointer_leave)
         self._text_box.bind("<Key>", self._block_typing)
         # 미리보기 안에서도, 창 전체에서도 Ctrl+F 가 통하게 한다.
         self._text_box.bind("<Control-f>", self._show_find_bar)
@@ -250,6 +268,15 @@ class PreviewView(RoundedCardShell):
     def scroll_text_by_wheel(self, delta: int) -> None:
         """미리보기 본문만 스크롤한다. (창 휠 처리기가 포인터가 본문 위일 때 부름)"""
         self._text_box.yview_scroll(int(-delta / 120), "units")
+
+    def can_scroll_text(self) -> bool:
+        """
+        미리보기 본문을 휠로 더 굴릴 수 있는가?
+
+        본문이 칸에 다 보이면 False. 그때는 창 전체가 스크롤돼야 한다.
+        """
+        top_fraction, bottom_fraction = self._text_box.yview()
+        return top_fraction > 0.0 or bottom_fraction < 1.0
 
     @property
     def text_box(self) -> tk.Text:
@@ -387,6 +414,14 @@ class PreviewView(RoundedCardShell):
             style="Card.Danger.TLabel",
         )
 
+    def _configure_all_color_tags(self) -> None:
+        """미리보기에서 쓸 밑줄 색마다 형광펜 태그를 미리 만들어 둔다."""
+        for color_name, background_hex in PREVIEW_HIGHLIGHT_BY_COLOR_NAME.items():
+            self._text_box.tag_configure(
+                _selected_tag_for_color(color_name),
+                background=background_hex,
+            )
+
     def clear_selected_phrases(self) -> None:
         """
         드래그로 고른 밑줄 표시만 지운다.
@@ -394,17 +429,41 @@ class PreviewView(RoundedCardShell):
         본문 텍스트 자체는 유지하고, 선택 하이라이트 태그와 추적 목록만 비운다.
         (왼쪽 '밑줄 초기화' 에서 부른다. 칩은 이미 비운 뒤라 콜백은 안 보낸다.)
         """
-        self._text_box.tag_remove(SELECTED_PHRASE_TAG, "1.0", tk.END)
+        for color_name in PREVIEW_HIGHLIGHT_BY_COLOR_NAME:
+            self._text_box.tag_remove(
+                _selected_tag_for_color(color_name), "1.0", tk.END
+            )
         self._selected_phrase_ranges.clear()
+
+    def set_pending_highlight_color(self, color_name: str) -> None:
+        """
+        다음에 드래그할 때 쓸 형광펜 색만 정해 둔다.
+
+        이미 칠해 둔 구간은 건드리지 않는다. Combobox 를 바꿔도
+        예전 드래그 색이 따라가지 않게 하기 위해서다.
+        """
+        self._pending_color_name = color_name or DEFAULT_UNDERLINE_COLOR_NAME
+        background_hex = PREVIEW_HIGHLIGHT_BY_COLOR_NAME.get(
+            self._pending_color_name,
+            SELECTED_PHRASE_BACKGROUND,
+        )
+        self._text_box.tag_configure(
+            _selected_tag_for_color(self._pending_color_name),
+            background=background_hex,
+        )
 
     def set_selected_highlight_color(self, background_hex: str) -> None:
         """
-        고른 문구 형광펜 색을 바꾼다.
+        예전 이름 호환용. 이제는 '다음 드래그 색' 만 바꾼다.
 
-        밑줄 색 Combobox 와 맞춰, PDF에 그을 색이 미리보기에서도 보이게 한다.
-        이미 칠해 둔 구간에도 바로 반영된다 (태그 설정만 바꾸면 된다).
+        background_hex 만 넘어오는 옛 호출을 위해, 짝이 맞는 색 이름을 찾아
+        pending 으로 둔다. 이미 고른 구간은 바꾸지 않는다.
         """
-        self._text_box.tag_configure(SELECTED_PHRASE_TAG, background=background_hex)
+        for color_name, known_hex in PREVIEW_HIGHLIGHT_BY_COLOR_NAME.items():
+            if known_hex == background_hex:
+                self.set_pending_highlight_color(color_name)
+                return
+        self.set_pending_highlight_color(DEFAULT_UNDERLINE_COLOR_NAME)
 
     def remove_selected_phrase(self, phrase: str) -> None:
         """
@@ -413,12 +472,14 @@ class PreviewView(RoundedCardShell):
         같은 문구가 여러 구간이면 모두 지운다. (칩은 문구 단위로 하나씩이므로)
         칩 쪽에서 이미 목록을 지웠으므로 on_phrase_removed 는 다시 부르지 않는다.
         """
-        remaining: list[tuple[str, str, str]] = []
-        for start, end, label in self._selected_phrase_ranges:
+        remaining: list[tuple[str, str, str, str]] = []
+        for start, end, label, color_name in self._selected_phrase_ranges:
             if label == phrase:
-                self._text_box.tag_remove(SELECTED_PHRASE_TAG, start, end)
+                self._text_box.tag_remove(
+                    _selected_tag_for_color(color_name), start, end
+                )
             else:
-                remaining.append((start, end, label))
+                remaining.append((start, end, label, color_name))
         self._selected_phrase_ranges = remaining
 
     def reset_view(self) -> None:
@@ -545,49 +606,136 @@ class PreviewView(RoundedCardShell):
     # 사용자 조작에 대한 반응
     # ------------------------------------------------------------------
 
-    def _on_pointer_pressed(self, event) -> None:
-        """마우스 버튼을 누른 글자 위치를 기억한다. 나중에 클릭인지 드래그인지 가른다."""
-        self._pointer_press_index = self._text_box.index(f"@{event.x},{event.y}")
+    def _on_left_press(self, event) -> None:
+        """왼쪽 버튼을 누른 글자 위치를 기억한다. (클릭인지 드래그인지 가를 때 씀)"""
+        self._left_press_index = self._text_box.index(f"@{event.x},{event.y}")
 
-    def _on_pointer_released(self, event) -> None:
+    def _on_left_release(self, event) -> None:
         """
-        손을 떼면: 짧은 클릭이면 빨간 밑줄 취소, 드래그면 밑줄 추가.
+        왼쪽 버튼을 떼었을 때.
 
-        클릭과 드래그를 한 이벤트에서 나누는 이유:
-        둘 다 ButtonRelease 에서 끝나므로, 누른 자리와 뗀 자리가
-        거의 같으면 클릭으로 본다.
+        - 누른 자리 = 뗀 자리이고, 그곳이 밑줄 표시 안이면 → 그 밑줄 삭제
+        - 그 외(드래그) → 고른 글자를 밑줄에 추가
         """
         release_index = self._text_box.index(f"@{event.x},{event.y}")
-        press_index = self._pointer_press_index
-        self._pointer_press_index = None
+        press_index = self._left_press_index
+        self._left_press_index = None
 
-        if press_index is not None and self._text_box.compare(
+        is_click = press_index is not None and self._text_box.compare(
             press_index, "==", release_index
-        ):
-            if self._try_remove_phrase_at(release_index):
-                return
+        )
+        if is_click and self._try_remove_phrase_at(release_index):
+            return
 
         self._on_drag_finished()
 
-    def _try_remove_phrase_at(self, text_index: str) -> bool:
+    def _on_text_pointer_motion(self, event) -> None:
         """
-        클릭한 자리가 빨간 표시 안이면 그 밑줄만 지우고 True.
+        밑줄 표시 위면 손가락(hand2), 아니면 글자 선택(xterm) 커서로 바꾼다.
 
-        왼쪽 칩에도 같은 문구를 빼 달라고 on_phrase_removed 를 부른다.
+        왜 tag_configure(cursor=…) 가 아닌가:
+          이 환경의 Text 위젯 태그는 -cursor 옵션을 모른다.
+          그래서 마우스 위치를 직접 보고 위젯 커서를 바꾼다.
         """
-        for index, (start, end, phrase) in enumerate(self._selected_phrase_ranges):
-            # start <= 클릭 < end 이면 이 구간이다.
+        text_index = self._text_box.index(f"@{event.x},{event.y}")
+        self._set_hover_cursor_for_index(text_index)
+
+    def _on_text_pointer_leave(self, _event=None) -> None:
+        """본문 밖으로 나가면 기본 글자 커서로 되돌린다."""
+        self._text_box.configure(cursor="xterm")
+
+    def _set_hover_cursor_for_index(self, text_index: str) -> None:
+        """글자 위치가 밑줄 표시 안이면 손가락, 아니면 I-beam."""
+        if self._phrase_index_covering(text_index) is not None:
+            self._text_box.configure(cursor="hand2")
+        else:
+            self._text_box.configure(cursor="xterm")
+
+    def _on_right_click_phrase(self, event) -> str:
+        """
+        밑줄 표시 위에서 오른쪽 클릭하면 색 바꾸기 메뉴를 연다.
+
+        왼쪽 클릭은 '지우기' 전용으로 두고, 색 변경만 오른쪽에서 한다.
+        """
+        text_index = self._text_box.index(f"@{event.x},{event.y}")
+        if self._try_show_phrase_menu_at(text_index, event):
+            return "break"
+        return "break"
+
+    def _try_show_phrase_menu_at(self, text_index: str, event) -> bool:
+        """
+        자리가 밑줄 표시 안이면 색 바꾸기·취소 메뉴를 띄우고 True.
+        """
+        phrase_index = self._phrase_index_covering(text_index)
+        if phrase_index is None:
+            return False
+
+        menu = tk.Menu(self, tearoff=0)
+        for color_name, _rgb in UNDERLINE_COLOR_CHOICES:
+            menu.add_command(
+                label=f"색 → {color_name}",
+                command=lambda name=color_name, index=phrase_index: self._recolor_phrase_at(
+                    index, name
+                ),
+            )
+        # 지우기는 왼쪽 클릭이 담당한다. 메뉴에는 색만 둔다.
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return True
+
+    def _phrase_index_covering(self, text_index: str) -> int | None:
+        """위치가 들어 있는 밑줄 구간의 목록 번호를 돌려준다."""
+        for index, (start, end, _phrase, _color_name) in enumerate(
+            self._selected_phrase_ranges
+        ):
             if self._text_box.compare(text_index, "<", start):
                 continue
             if self._text_box.compare(text_index, ">=", end):
                 continue
+            return index
+        return None
 
-            self._text_box.tag_remove(SELECTED_PHRASE_TAG, start, end)
-            del self._selected_phrase_ranges[index]
-            if self._on_phrase_removed is not None:
-                self._on_phrase_removed(phrase)
-            return True
-        return False
+    def _recolor_phrase_at(self, phrase_index: int, color_name: str) -> None:
+        """이미 고른 구간 하나의 형광펜·저장 색만 바꾼다."""
+        if not (0 <= phrase_index < len(self._selected_phrase_ranges)):
+            return
+        start, end, phrase, old_color_name = self._selected_phrase_ranges[phrase_index]
+        if old_color_name == color_name:
+            return
+        self._text_box.tag_remove(_selected_tag_for_color(old_color_name), start, end)
+        self._text_box.tag_add(_selected_tag_for_color(color_name), start, end)
+        self._selected_phrase_ranges[phrase_index] = (
+            start,
+            end,
+            phrase,
+            color_name,
+        )
+        if self._on_phrase_color_changed is not None:
+            self._on_phrase_color_changed(phrase, color_name)
+
+    def _remove_phrase_at_index(self, phrase_index: int) -> None:
+        """목록 번호로 밑줄 하나를 지우고 칩에도 알린다."""
+        if not (0 <= phrase_index < len(self._selected_phrase_ranges)):
+            return
+        start, end, phrase, color_name = self._selected_phrase_ranges[phrase_index]
+        self._text_box.tag_remove(_selected_tag_for_color(color_name), start, end)
+        del self._selected_phrase_ranges[phrase_index]
+        if self._on_phrase_removed is not None:
+            self._on_phrase_removed(phrase)
+
+    def _try_remove_phrase_at(self, text_index: str) -> bool:
+        """
+        클릭한 자리가 밑줄 표시 안이면 그 밑줄만 지우고 True.
+
+        검증 스크립트와 메뉴의 '밑줄 취소' 가 같이 쓴다.
+        """
+        phrase_index = self._phrase_index_covering(text_index)
+        if phrase_index is None:
+            return False
+        self._remove_phrase_at_index(phrase_index)
+        return True
 
     def _on_drag_finished(self, _event=None) -> None:
         """
@@ -595,6 +743,7 @@ class PreviewView(RoundedCardShell):
 
         같은 문구가 미리보기에 두 번 이상 나오면 "문구 [N번째]" 형태로 넘긴다.
         전체보기면 선택 시작 위치가 속한 조문 번호도 함께 넘긴다.
+        색은 '지금 Combobox/pending 색' 만 쓰고, 이미 고른 구간은 건드리지 않는다.
         """
         selected = self._read_selected_text()
         if not selected:
@@ -606,10 +755,15 @@ class PreviewView(RoundedCardShell):
         except tk.TclError:
             return
 
-        self._text_box.tag_add(SELECTED_PHRASE_TAG, selection_start, selection_end)
+        color_name = self._pending_color_name or DEFAULT_UNDERLINE_COLOR_NAME
+        self._text_box.tag_add(
+            _selected_tag_for_color(color_name),
+            selection_start,
+            selection_end,
+        )
         phrase = self._label_with_occurrence(selected, selection_start)
         self._selected_phrase_ranges.append(
-            (selection_start, selection_end, phrase)
+            (selection_start, selection_end, phrase, color_name)
         )
 
         detected_article: ArticleNumber | None = None

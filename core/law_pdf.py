@@ -29,6 +29,7 @@ from core.errors import (
     ArticlePdfDownloadError,
     LawSiteStructureChangedError,
 )
+from core.hide_subprocess_console import apply_no_console_window_for_subprocesses
 from core.models import LawVersion
 
 # 조문 체크박스가 달고 있는 값에서 조·가지번호를 읽어내는 규칙.
@@ -102,6 +103,11 @@ class LawSiteBrowser:
         # sync_playwright() 보다 먼저 환경변수를 켜야 반영된다.
         if not config.SHOW_BROWSER_WINDOW:
             os.environ["PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL"] = "0"
+
+        # pythonw 로 켠 뒤 Playwright 가 node·Chromium 을 띄울 때
+        # Windows 가 검은 명령창을 새로 만들지 않게 한다.
+        # sync_playwright().start() 보다 먼저 적용해야 드라이버 기동부터 막힌다.
+        apply_no_console_window_for_subprocesses()
 
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(

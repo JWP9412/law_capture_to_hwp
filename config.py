@@ -14,7 +14,7 @@ from pathlib import Path
 # 프로그램 버전
 # ---------------------------------------------------------------------------
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 
 # ---------------------------------------------------------------------------
 # 폴더 위치
@@ -23,6 +23,10 @@ APP_VERSION = "3.0.0"
 PROJECT_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIRECTORY = PROJECT_ROOT / "out"
 LOG_DIRECTORY = PROJECT_ROOT / "logs"
+
+# 캡처 실패(밑줄 문구를 못 찾은 경우 등)를 모아 두는 폴더.
+# 나중에 AI·직접 확인으로 고칠 때 여기 파일을 열어보면 된다.
+FAILURE_FEEDBACK_DIRECTORY = OUTPUT_DIRECTORY / "실패기록"
 
 # 자주 쓰는 법령·고시 즐겨찾기. 프로그램이 직접 읽고 쓰는 사용자 파일이다.
 # (개정본 번호는 넣지 않는다 — 개정될 때마다 바뀌어 깨지기 때문이다)

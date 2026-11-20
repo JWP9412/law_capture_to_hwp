@@ -131,8 +131,14 @@ class ArticleCaptureJob:
     article_numbers: list[ArticleNumber]
     underline_phrases: list[str]
     # PDF 밑줄 색 (PyMuPDF 0~1 RGB). 기본은 빨강.
+    # 문구마다 색이 다를 때는 underline_phrase_colors 를 보고,
+    # 없는 문구만 이 기본 색을 쓴다.
     underline_color: tuple[float, float, float] = field(
         default_factory=lambda: config.UNDERLINE_COLOR
+    )
+    # 문구 라벨 → PDF 밑줄 색. 비어 있으면 전부 underline_color 를 쓴다.
+    underline_phrase_colors: dict[str, tuple[float, float, float]] = field(
+        default_factory=dict
     )
     # 그림을 넣을 기존 한글 문서. 비워두면(None) 새 문서를 만든다.
     target_hwp_path: Path | None = None
@@ -175,6 +181,10 @@ class ArticleCaptureTask:
     # PDF 밑줄 색 (PyMuPDF 0~1 RGB). 기본은 빨강.
     underline_color: tuple[float, float, float] = field(
         default_factory=lambda: config.UNDERLINE_COLOR
+    )
+    # 문구 라벨 → PDF 밑줄 색. 비어 있으면 전부 underline_color 를 쓴다.
+    underline_phrase_colors: dict[str, tuple[float, float, float]] = field(
+        default_factory=dict
     )
     should_add_caption: bool = True
     should_add_border: bool = True
@@ -263,6 +273,8 @@ class CaptureRunResult:
     succeeded: list[CapturedArticle] = field(default_factory=list)
     failed: list[CaptureFailure] = field(default_factory=list)
     result_hwp_path: Path | None = None
+    # 실패 건을 모아 둔 폴더(out/실패기록). 없으면 None.
+    failure_log_directory: Path | None = None
 
     @property
     def total_count(self) -> int:

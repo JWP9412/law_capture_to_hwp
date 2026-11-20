@@ -22,6 +22,7 @@ import config
 from core import annotate, version_series
 from core.article_number import article_numbers_as_key
 from core.errors import LawCaptureError
+from core.failure_log import record_capture_failures
 from core.hwp_insert import PictureInsertion, open_hwp_document
 from core.law_pdf import open_law_site_browser
 from core.models import (
@@ -79,13 +80,28 @@ def run_capture_jobs(
         for task_index, task in enumerate(tasks, start=1):
             try:
                 article_key = article_numbers_as_key(task.article_numbers)
+                # 중간 단계도 화면에 남긴다.
+                # 예전에는 완료/실패만 알려서, 긴 조문 받는 동안 기록이 비어 보였다.
+                report_progress(
+                    task_index, len(tasks), task, WorkStage.DOWNLOADING_PDF, ""
+                )
                 captured = _capture_one_article(
                     task,
                     browser,
                     working_directory,
                     previous_body_text_by_article.get(article_key, ""),
+                    report_stage=lambda stage: report_progress(
+                        task_index, len(tasks), task, stage, ""
+                    ),
                 )
                 # 그림 번호는 파이썬이 세지 않는다. 한글 자동번호 필드가 맡는다.
+                report_progress(
+                    task_index,
+                    len(tasks),
+                    task,
+                    WorkStage.INSERTING_INTO_DOCUMENT,
+                    "",
+                )
                 _insert_into_document(editor, captured)
 
                 result.succeeded.append(captured)
@@ -99,7 +115,11 @@ def run_capture_jobs(
                 result.failed.append(CaptureFailure(task, error))
                 report_progress(task_index, len(tasks), task, WorkStage.FAILED, str(error))
 
-    result.result_hwp_path = result_hwp_path
+        # 같은 이름이 있어 (2), (3) … 으로 바뀌었을 수 있다.
+        result.result_hwp_path = editor.result_path
+
+    # 밑줄 문구를 못 찾은 실패 등은 파일에 남겨, 나중에 AI·직접 확인할 수 있게 한다.
+    result.failure_log_directory = record_capture_failures(result.failed)
     return result
 
 
@@ -118,21 +138,32 @@ def _capture_one_article(
     browser,
     working_directory: Path,
     previous_body_text: str,
+    report_stage: Callable[[WorkStage], None] | None = None,
 ) -> CapturedArticle:
     """
     조문 하나를 내려받아 밑줄을 긋고 그림으로 만든다.
 
     조문이 길면 PDF 가 여러 쪽이 되고, 그림도 쪽 수만큼 나온다.
     (「주택법」 제2조처럼 3쪽까지 가는 조문이 드물지 않다)
+
+    report_stage 는 화면 쪽 진행 칸에 '지금 어느 단계인지' 를 남길 때 쓴다.
+    core 는 화면을 모르므로, 호출하는 쪽(pipeline → controller)이 콜백으로 잇는다.
     """
+    def _notify(stage: WorkStage) -> None:
+        if report_stage is not None:
+            report_stage(stage)
+
+    # DOWNLOADING_PDF 는 바깥(run_capture_jobs)에서 이미 알린 뒤 들어온다.
     pdf_path = browser.download_article_pdf(task.version, task.article_numbers)
 
+    _notify(WorkStage.DRAWING_UNDERLINE)
     first_image_path = working_directory / f"{pdf_path.stem}.png"
     image_paths = annotate.underline_and_capture(
         pdf_path,
         task.underline_phrases,
         first_image_path,
         underline_color=task.underline_color,
+        underline_phrase_colors=task.underline_phrase_colors,
     )
 
     body_text = annotate.extract_article_body_text(pdf_path)

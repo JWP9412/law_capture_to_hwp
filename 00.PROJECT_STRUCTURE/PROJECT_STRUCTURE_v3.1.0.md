@@ -1,0 +1,75 @@
+# PROJECT_STRUCTURE v3.1.0
+
+법령 조문 캡처 → 한글 삽입 자동화 (`law_capture`) 폴더 구조.
+
+```
+law_capture_to_hwp/
+├── 법령캡처_실행.pyw          # 더블클릭 실행
+├── main.py                    # 창 시작점
+├── config.py                  # 설정·APP_VERSION (3.1.0)
+├── run_from_command_line.py   # CLI 실행
+├── README.md                  # 최신 사용법
+├── 인수인계.md
+├── 설치목록.md
+├── user_favorites.json        # 사용자 즐겨찾기 (gitignore)
+├── user_capture_set_memory.json  # 사용자 지정 SET (gitignore)
+│
+├── core/                      # 화면을 모름 — 실제 기능
+│   ├── law_source.py          # 검색·연혁·시점별 판
+│   ├── law_site.py            # 법령정보센터 HTTP
+│   ├── law_pdf.py             # Playwright PDF (리뉴얼 저장 창)
+│   ├── article_number.py      # 조문 번호 해석·옆 조 계산
+│   ├── article_text.py        # 미리보기·전체보기 글자
+│   ├── favorites.py           # 즐겨찾기 JSON (가나다순)
+│   ├── capture_set_memory.py  # 사용자 지정 SET JSON
+│   ├── annotate.py            # 밑줄·제목부터 자르기 (문구별 색)
+│   ├── hwp_insert.py          # 한글 삽입 (같은 이름이면 (2)…)
+│   ├── version_series.py      # 개정본 비교·캡션
+│   ├── pipeline.py            # 전체 파이프라인
+│   ├── failure_log.py         # 캡처 실패 → out/실패기록
+│   ├── hide_subprocess_console.py  # 하위 프로세스 CMD 숨김
+│   ├── models.py
+│   └── errors.py
+│
+├── ui/                        # 법령·한글을 모름 — 화면만
+│   ├── app_window.py          # 머리 띠·창 스크롤·폭 10px 맞춤
+│   ├── input_view.py          # 개정본 휠·목록·밑줄 칩
+│   ├── preview_view.py        # 드래그·왼쪽클릭 삭제·오른쪽클릭 색
+│   ├── favorites_dialog.py    # 즐겨찾기 설정 창
+│   ├── capture_set_memory_dialog.py  # SET 설정 창
+│   ├── taskbar_identity.py    # 작업 표시줄 아이콘
+│   ├── progress_view.py       # 진행 + 기록 로그
+│   ├── result_view.py         # 결과·실패 기록 열기
+│   ├── controller.py          # UI ↔ core
+│   ├── theme.py               # 법령정보센터 색·둥근 스타일
+│   ├── rounded_shapes.py      # 둥근 모서리 그림 (ttk 아홉 조각)
+│   └── widgets.py             # RoundedCardShell·StepCard·VCheckbutton
+│
+├── spike/                     # 검증 스크립트 (한글 켜는 것 주의)
+│   ├── check_gui.py
+│   ├── check_ui_speed.py      # 화면 반응 속도
+│   ├── check_button_pressed.py
+│   └── _shot_design.py        # 화면 캡처 (디자인 확인)
+│
+├── docs/
+│   ├── VERSION_RELEASE_CHECKLIST.md
+│   └── mockup/                # 디자인 목업 HTML·PNG
+│
+├── out/                       # 결과·중간 파일 (gitignore)
+│   └── 실패기록/              # 실패 md·jsonl (실행 시 생성)
+├── logs/                      # 로그 (gitignore)
+│
+├── 00.README/
+│   ├── README_v1.0.0.md … README_v3.1.0.md
+├── 00.CHANGELOG/
+│   ├── CHANGELOG_v1.0.0.md … CHANGELOG_v3.1.0.md
+└── 00.PROJECT_STRUCTURE/
+    ├── PROJECT_STRUCTURE_v1.0.0.md … PROJECT_STRUCTURE_v3.1.0.md
+```
+
+## 계층 규칙
+
+- `core/` 는 UI를 모른다. 실패 시 `core/errors.py` 예외.
+- `ui/` 는 법령·한글 API를 모른다. `controller.py` 만 둘을 잇는다.
+- 예외를 잡아 조문별로 계속 진행하는 곳은 `pipeline.run_capture_jobs` 한 곳.
+- 실패 파일 기록은 `failure_log.record_capture_failures` → `pipeline` 이 호출한다.

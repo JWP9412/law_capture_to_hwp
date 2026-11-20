@@ -59,6 +59,9 @@ class AppWindow(tk.Tk):
         self.minsize(980, 640)
 
         self._controller = LawCaptureController()
+        # 캡처를 누를 때 창이 이미 최소화돼 있었는지.
+        # 끝났을 때 창을 되돌릴지 말지 가리는 데만 쓴다. (아래 _restore_window_after_capture)
+        self._was_minimized_when_capture_started = False
 
         # 머리 띠는 입력·진행·완료 세 화면 공통으로 맨 위에 둔다.
         # 화면을 바꿔 끼우는 스크롤 틀 '바깥' 이어야 스크롤해도 안 사라진다.
@@ -235,8 +238,9 @@ class AppWindow(tk.Tk):
         마우스 휠을 포인터 아래 칸에 맞게 굴린다.
 
         - 개정본 목록 위 + 목록이 김 → 목록만
-        - 개정본 목록 위 + 목록이 짧음 → 창 전체 (스크롤할 게 없으므로)
-        - 미리보기 본문 위 → 본문만 (조문 읽다가 창 전체가 움직이지 않게)
+        - 개정본 목록 위 + 목록이 짧음 → 창 전체
+        - 미리보기 본문 위 + 본문이 김 → 본문만
+        - 미리보기 본문 위 + 본문이 짧음 → 창 전체
         - 그 밖 → 창 전체
 
         포인터 위치를 먼저 보는 이유:
@@ -256,8 +260,10 @@ class AppWindow(tk.Tk):
             # 목록이 짧으면 아래 창 전체 스크롤로 넘어간다.
 
         if _is_under(target_widget, self._input_view.preview_view.text_box):
-            self._input_view.preview_view.scroll_text_by_wheel(event.delta)
-            return
+            if self._input_view.preview_view.can_scroll_text():
+                self._input_view.preview_view.scroll_text_by_wheel(event.delta)
+                return
+            # 본문이 짧으면 아래 창 전체 스크롤로 넘어간다.
 
         self._scroll_canvas.yview_scroll(int(-event.delta / 120), "units")
 
@@ -292,6 +298,40 @@ class AppWindow(tk.Tk):
         self.title(f"{WINDOW_TITLE} — 완료")
         self._show_only(self._result_view)
 
+    def _restore_window_after_capture(self) -> None:
+        """
+        캡처가 끝난 뒤, 우리 창이 작업표시줄로 내려갔다면 다시 펼친다.
+
+        왜 이 함수가 필요한가:
+          코드 어디에도 iconify(최소화) 를 부르지 않는다. 그런데도 한글을
+          뒤에서 켜고 끄는 동안 윈도우가 포커스를 뺏기며, 우리 창이
+          최소화되거나 다른 창 뒤로 숨을 수 있다. 완료 화면으로 바꿔 놓고도
+          창이 안 보이면 사용자는 끝난 줄 모르고 기다리게 된다.
+
+        왜 무조건 deiconify 하지 않는가:
+          캡처를 시작하기 전에 사용자가 이미 창을 최소화해 둔 경우에는
+          그 뜻을 존중한다. 시작 당시에는 펼쳐 있었는데 끝났을 때
+          최소화돼 있다면, 그건 우리가 켠 한글·브라우저 쪽 부작용으로 보고
+          되돌린다.
+
+        focus_force 는 쓰지 않는다. 다른 창에서 작업 중일 때 입력 포커스까지
+        뺏으면 방해가 된다. lift 와 아주 잠깐의 맨 앞 표시만으로 창을 보이게 한다.
+        """
+        if self._was_minimized_when_capture_started:
+            return
+        try:
+            if self.state() == "iconic":
+                self.deiconify()
+            self.lift()
+            # Windows 는 포커스를 뺏긴 뒤 lift 만으로는 창을 앞으로
+            # 안 올리는 경우가 있다. 맨 앞 표시를 아주 짧게 켰다 끄면
+            # 입력 포커스는 뺏지 않으면서 창만 보이게 할 수 있다.
+            self.attributes("-topmost", True)
+            self.after(50, lambda: self.attributes("-topmost", False))
+        except tk.TclError:
+            # 창이 이미 닫히는 중이면 상태 조회·변경이 실패할 수 있다.
+            pass
+
     # ------------------------------------------------------------------
     # 작업 시작과 진행
     # ------------------------------------------------------------------
@@ -302,6 +342,13 @@ class AppWindow(tk.Tk):
 
         result_path = _decide_result_path(jobs)
         total_count = sum(job.expected_figure_count for job in jobs)
+
+        # 시작 전에 이미 최소화돼 있었는지만 기억한다.
+        # 끝났을 때 '우리가 망가뜨린 최소화' 와 '사용자가 원한 최소화' 를 가르기 위함이다.
+        try:
+            self._was_minimized_when_capture_started = self.state() == "iconic"
+        except tk.TclError:
+            self._was_minimized_when_capture_started = False
 
         self._show_progress_view(total_count)
         self._controller.start_capture(jobs, result_path)
@@ -334,19 +381,25 @@ class AppWindow(tk.Tk):
         elif isinstance(message, ArticleTextFailed):
             self._input_view.preview_view.show_failure(str(message.error))
         elif isinstance(message, ProgressUpdate):
+            # stage.value 는 「조문 내려받는 중」처럼 한국어 단계 이름이다.
+            # 화면은 법령·한글을 모르고, 컨트롤러가 넘긴 글자만 기록 칸에 붙인다.
             self._progress_view.show_progress(
                 message.finished_count,
                 message.total_count,
                 message.description,
                 message.is_failure,
                 message.detail,
+                stage_label=message.stage.value,
+                is_item_done=message.is_item_done,
             )
         elif isinstance(message, RunFinished):
             self._result_view.show_result(message.result)
             self._show_result_view()
+            self._restore_window_after_capture()
         elif isinstance(message, RunCrashed):
             self._result_view.show_crash(message.error)
             self._show_result_view()
+            self._restore_window_after_capture()
 
 
 def _is_under(widget, ancestor) -> bool:

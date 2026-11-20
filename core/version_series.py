@@ -36,6 +36,7 @@ def expand_into_tasks(job: ArticleCaptureJob) -> list[ArticleCaptureTask]:
             target_hwp_path=job.target_hwp_path,
             insertion_mode=job.insertion_mode,
             underline_color=job.underline_color,
+            underline_phrase_colors=dict(job.underline_phrase_colors),
             should_add_caption=job.should_add_caption,
             should_add_border=job.should_add_border,
         )

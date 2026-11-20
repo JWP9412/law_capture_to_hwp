@@ -99,6 +99,8 @@ class InputView(ttk.Frame):
         self._version_checkboxes: list[tuple[tk.BooleanVar, LawVersion]] = []
         self._jobs: list[ArticleCaptureJob] = []
         self._underline_phrases: list[str] = []
+        # 밑줄 문구마다 고른 색 이름. Combobox 는 '다음에 드래그할 색' 만 바꾼다.
+        self._underline_phrase_colors: dict[str, str] = {}
         self._favorites: list[FavoriteLaw] = []
         self._capture_memory_sets = []
 
@@ -123,6 +125,7 @@ class InputView(ttk.Frame):
             on_open_original=self._open_original_in_browser,
             on_phrase_removed=self._remove_underline_phrase_by_text,
         )
+        self._preview_view._on_phrase_color_changed = self._on_preview_phrase_color_changed
         self._preview_view.set_on_move_article(self._move_preview_article)
 
         self._build_law_search_row()
@@ -1379,30 +1382,45 @@ class InputView(ttk.Frame):
     def _append_underline_phrase(self, phrase: str) -> None:
         """
         중복을 피하면서 밑줄 문구 목록에 추가한다.
+
+        색은 '지금 Combobox 색' 을 그 문구에만 붙인다.
+        (이미 고른 다른 문구 색은 바꾸지 않는다)
         """
         cleaned_phrase = phrase.strip()
         if not cleaned_phrase:
             return
         if cleaned_phrase in self._underline_phrases:
             return
+        color_name = self._underline_color_picker.get() or DEFAULT_UNDERLINE_COLOR_NAME
         self._underline_phrases.append(cleaned_phrase)
+        self._underline_phrase_colors[cleaned_phrase] = color_name
         self._render_underline_phrase_chips()
 
     def _on_underline_color_changed(self, _event=None) -> None:
         """
-        밑줄 색을 바꾸면 미리보기 형광펜도 같은 계열로 맞춘다.
+        Combobox 색은 '다음에 드래그할 색' 만 바꾼다.
 
-        PDF에 그을 색과 미리보기 칠이 어긋나면 '고른 색이 안 바뀐 것 같다'고
-        느끼기 쉽다. Combobox 선택 직후 바로 반영한다.
+        이미 미리보기에 칠해 둔 구간은 그대로 둔다.
+        예전 구간은 왼쪽 클릭으로 지우고, 색은 오른쪽 클릭 메뉴에서 고른다.
         """
-        self._apply_preview_highlight_for_current_color()
+        self._apply_preview_pending_color()
+
+    def _apply_preview_pending_color(self) -> None:
+        """지금 Combobox 색을 '다음 드래그용' 으로만 미리보기에 알려 준다."""
+        color_name = self._underline_color_picker.get() or DEFAULT_UNDERLINE_COLOR_NAME
+        self._preview_view.set_pending_highlight_color(color_name)
 
     def _apply_preview_highlight_for_current_color(self) -> None:
-        """지금 Combobox에 있는 색 이름으로 미리보기 형광펜을 설정한다."""
-        color_name = self._underline_color_picker.get() or DEFAULT_UNDERLINE_COLOR_NAME
-        self._preview_view.set_selected_highlight_color(
-            preview_highlight_for_name(color_name)
-        )
+        """예전 이름 호환. 이제는 다음 드래그 색만 맞춘다."""
+        self._apply_preview_pending_color()
+
+    def _on_preview_phrase_color_changed(self, phrase: str, color_name: str) -> None:
+        """미리보기 메뉴에서 구간 색을 바꿨을 때 칩·저장 색을 맞춘다."""
+        cleaned = phrase.strip()
+        if not cleaned:
+            return
+        self._underline_phrase_colors[cleaned] = color_name
+        self._render_underline_phrase_chips()
 
     def _reset_underline_phrases(self) -> None:
         """
@@ -1410,6 +1428,7 @@ class InputView(ttk.Frame):
         """
         self._underline_phrase_entry.delete(0, tk.END)
         self._underline_phrases.clear()
+        self._underline_phrase_colors.clear()
         self._render_underline_phrase_chips()
         self._preview_view.clear_selected_phrases()
 
@@ -1423,18 +1442,20 @@ class InputView(ttk.Frame):
             return
         phrase = self._underline_phrases[index]
         del self._underline_phrases[index]
+        self._underline_phrase_colors.pop(phrase, None)
         self._render_underline_phrase_chips()
         self._preview_view.remove_selected_phrase(phrase)
 
     def _remove_underline_phrase_by_text(self, phrase: str) -> None:
         """
-        미리보기에서 빨간 표시를 클릭해 지웠을 때 칩 목록을 맞춘다.
+        미리보기에서 밑줄 취소를 골랐을 때 칩 목록을 맞춘다.
 
         미리보기 쪽 표시는 이미 지워진 상태이므로 remove_selected_phrase 는 부르지 않는다.
         """
         cleaned = phrase.strip()
         if cleaned in self._underline_phrases:
             self._underline_phrases.remove(cleaned)
+            self._underline_phrase_colors.pop(cleaned, None)
             self._render_underline_phrase_chips()
 
     def _render_underline_phrase_chips(self) -> None:
@@ -1455,9 +1476,12 @@ class InputView(ttk.Frame):
         for index, phrase in enumerate(self._underline_phrases):
             chip_row = ttk.Frame(self._underline_chips_frame, style="Card.TFrame")
             chip_row.pack(fill="x", pady=(0, 4))
+            color_name = self._underline_phrase_colors.get(
+                phrase, DEFAULT_UNDERLINE_COLOR_NAME
+            )
             ttk.Label(
                 chip_row,
-                text=f"• {phrase}",
+                text=f"• [{color_name}] {phrase}",
                 wraplength=420,
                 style="Card.TLabel",
             ).pack(side="left", fill="x", expand=True)
@@ -1549,6 +1573,7 @@ class InputView(ttk.Frame):
         self._article_entry.delete(0, tk.END)
         self._underline_phrase_entry.delete(0, tk.END)
         self._underline_phrases.clear()
+        self._underline_phrase_colors.clear()
         self._render_underline_phrase_chips()
 
     def _build_job_from_inputs(self) -> ArticleCaptureJob:
@@ -1567,6 +1592,12 @@ class InputView(ttk.Frame):
         # 실행 직전에 "그래도 진행할까요?" 로 한 번 더 확인한다.
         phrases = list(self._underline_phrases)
         color_name = self._underline_color_picker.get() or DEFAULT_UNDERLINE_COLOR_NAME
+        phrase_colors = {
+            phrase: underline_color_for_name(
+                self._underline_phrase_colors.get(phrase, color_name)
+            )
+            for phrase in phrases
+        }
 
         return ArticleCaptureJob(
             law_name=self._found_law.law_name,
@@ -1574,6 +1605,7 @@ class InputView(ttk.Frame):
             article_numbers=article_numbers,
             underline_phrases=phrases,
             underline_color=underline_color_for_name(color_name),
+            underline_phrase_colors=phrase_colors,
             target_hwp_path=self._read_target_document_path(),
             insertion_mode=_find_insertion_mode(self._insertion_mode.get()),
             should_add_caption=self._should_add_caption.get(),
@@ -1690,6 +1722,7 @@ class InputView(ttk.Frame):
             self._article_entry.delete(0, tk.END)
             self._underline_phrase_entry.delete(0, tk.END)
             self._underline_phrases.clear()
+            self._underline_phrase_colors.clear()
             self._render_underline_phrase_chips()
 
             for widget in self._version_list_frame.winfo_children():

@@ -108,6 +108,16 @@ class HwpDocumentEditor:
         self._our_hwp_instance_names: set[str] = set()
         self._our_document = None
 
+    @property
+    def result_path(self) -> Path:
+        """
+        실제로 저장된 결과 파일 위치.
+
+        같은 이름이 있어 (2), (3) … 으로 바뀌었을 수 있으므로,
+        처음에 넘긴 경로가 아니라 이 값을 화면에 보여 줘야 한다.
+        """
+        return self._result_path
+
     def __enter__(self) -> "HwpDocumentEditor":
         from pyhwpx import Hwp
 
@@ -488,8 +498,28 @@ class HwpDocumentEditor:
         return temporary_path
 
     def _move_into_place(self, temporary_path: Path) -> None:
+        """
+        임시 폴더에 둔 결과물을 최종 위치로 옮긴다.
+
+        같은 이름이 이미 있으면 덮어쓰지 않고 ' (2)', ' (3)' … 을 붙여
+        새 파일로 저장한다. 잠긴 파일을 덮으려다 Permission denied 가
+        나던 문제를 이렇게 피한다.
+        """
         self._result_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(temporary_path), str(self._result_path))
+        destination = _next_available_hwp_path(self._result_path)
+        try:
+            shutil.move(str(temporary_path), str(destination))
+            self._result_path = destination
+        except PermissionError as error:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise HwpAutomationError(
+                "결과 파일 저장",
+                f"'{destination.name}' 위치에 저장할 수 없습니다. "
+                "폴더 권한이나 보안 프로그램을 확인해 주세요.",
+            ) from error
 
     def _quit_hwp(self) -> None:
         """
@@ -591,6 +621,28 @@ def _calculate_height_keeping_aspect_ratio(image_path: Path) -> float:
     """정해진 가로 폭에 맞출 때 그림이 찌그러지지 않도록 세로 길이를 계산한다."""
     with Image.open(image_path) as image:
         return config.PICTURE_WIDTH_IN_MILLIMETERS * image.height / image.width
+
+
+def _next_available_hwp_path(path: Path) -> Path:
+    """
+    같은 이름이 있으면 '이름 (2).hwp', '이름 (3).hwp' … 로 비어 있는 이름을 고른다.
+
+    덮어쓰려다 잠긴 파일에 걸려 실패하는 것보다, 새 파일로 남기는 편이
+    사용자가 이전에 만든 결과를 잃지 않아 안전하다.
+    """
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    for number in range(2, 1000):
+        candidate = parent / f"{stem} ({number}){suffix}"
+        if not candidate.exists():
+            return candidate
+    raise HwpAutomationError(
+        "결과 파일 저장",
+        f"'{path.name}' 과 비슷한 이름이 너무 많아 새 이름을 정할 수 없습니다.",
+    )
 
 
 def open_hwp_document(source_document_path: Path | None, result_path: Path):

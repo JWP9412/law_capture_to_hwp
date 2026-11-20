@@ -190,12 +190,34 @@ def register_stretchable_element(
     image_size = normal.width()
     border = min(scale_length(root, corner_radius), max(image_size // 2 - 1, 1))
     # (상태튜플, 그림) 쌍. 기본 그림은 맨 앞 인자로 넘긴다.
+    #
+    # 왜 순서를 강제하나:
+    #   ttk 는 앞에서부터 첫 번째로 맞는 상태를 고른다.
+    #   마우스로 누르는 순간에는 pressed 와 active 가 동시에 켜진다.
+    #   dict 삽입 순서(보통 active → pressed) 그대로 넘기면 active 가
+    #   먼저 맞아, pressed 그림이 영원히 안 보인다.
+    #   드문 상태(disabled/pressed)를 앞에 둬야 눌림이 눈에 보인다.
+    _STATE_PRIORITY = (
+        "disabled",
+        "pressed",
+        "selected",
+        "focus",
+        "active",
+    )
+    priority_rank = {name: index for index, name in enumerate(_STATE_PRIORITY)}
+
+    def _state_sort_key(state_name: str) -> tuple:
+        # 우선순위에 없는 이름은 뒤로, 같은 순위면 이름순.
+        return (priority_rank.get(state_name, len(_STATE_PRIORITY)), state_name)
+
     state_pairs: list = []
-    for state_name, photo in images_by_state.items():
-        if state_name == "normal":
-            continue
+    ordered_states = sorted(
+        (name for name in images_by_state if name != "normal"),
+        key=_state_sort_key,
+    )
+    for state_name in ordered_states:
         # ttk 상태 이름은 그대로: active, pressed, disabled, focus, selected …
-        state_pairs.append((state_name, photo))
+        state_pairs.append((state_name, images_by_state[state_name]))
 
     # 그림은 타일 붙이기를 줄이려고 크게(160+) 두되,
     # 요소가 '원하는 크기' 는 작게 알려 줘야 한다.

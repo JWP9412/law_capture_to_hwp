@@ -44,6 +44,14 @@ class ResultView(ttk.Frame):
         ttk.Button(
             button_row, text="출력 폴더 열기", command=self._open_output_folder
         ).pack(side="right", padx=4)
+        # 밑줄 문구를 못 찾은 실패 등을 모아 둔 폴더.
+        # AI·직접 확인으로 피드백을 적을 때 연다.
+        self._open_failure_log_button = ttk.Button(
+            button_row,
+            text="실패 기록 열기",
+            command=self._open_failure_log_folder,
+        )
+        self._open_failure_log_button.pack(side="right", padx=4)
         ttk.Button(button_row, text="처음으로", command=on_restart_requested).pack(
             side="left", padx=4
         )
@@ -53,6 +61,9 @@ class ResultView(ttk.Frame):
         self._summary_label.config(text=result.summary_for_display)
         self._show_failures(result)
         self._show_result_file(result)
+        self._open_failure_log_button.config(
+            state="normal" if result.failure_log_directory else "disabled"
+        )
 
     def show_crash(self, error: Exception) -> None:
         """작업 전체가 멈췄을 때. 이때는 결과 파일이 없다."""
@@ -62,6 +73,7 @@ class ResultView(ttk.Frame):
         self._write_failure_lines([str(error)])
         self._file_label.config(text="")
         self._open_document_button.config(state="disabled")
+        self._open_failure_log_button.config(state="disabled")
 
     def _show_failures(self, result: CaptureRunResult) -> None:
         if not result.has_any_failure:
@@ -69,9 +81,13 @@ class ResultView(ttk.Frame):
             return
 
         self._show_failure_frame()
-        self._write_failure_lines(
-            [failure.message_for_display for failure in result.failed]
-        )
+        lines = [failure.message_for_display for failure in result.failed]
+        if result.failure_log_directory is not None:
+            lines.append(
+                f"(자세한 기록: {result.failure_log_directory} "
+                "— [실패 기록 열기]로 확인·피드백할 수 있습니다)"
+            )
+        self._write_failure_lines(lines)
 
     def _show_failure_frame(self) -> None:
         """
@@ -104,6 +120,23 @@ class ResultView(ttk.Frame):
         import config
 
         _open_in_explorer(config.OUTPUT_DIRECTORY)
+
+    def _open_failure_log_folder(self) -> None:
+        """
+        실패 기록이 쌓인 폴더를 연다.
+
+        없으면 config 기본 폴더를 만들어 연다. (아직 실패가 없어도
+        어디에 쌓이는지 확인할 수 있게)
+        """
+        import config
+
+        folder = (
+            self._result.failure_log_directory
+            if self._result and self._result.failure_log_directory
+            else config.FAILURE_FEEDBACK_DIRECTORY
+        )
+        folder.mkdir(parents=True, exist_ok=True)
+        _open_in_explorer(folder)
 
 
 def _open_in_explorer(path: Path) -> None:

@@ -234,7 +234,7 @@ all_passed &= report("밑줄 초기화가 칩 목록을 비우는가", len(view.
 
 print("\n=== 3-4b. 밑줄 색 고르기 ===")
 import config as app_config
-from ui.preview_view import SELECTED_PHRASE_TAG
+from ui.preview_view import _selected_tag_for_color
 
 all_passed &= report(
     "밑줄 색 기본값이 빨강인가",
@@ -242,7 +242,7 @@ all_passed &= report(
     view._underline_color_picker.get(),
 )
 default_highlight = view.preview_view._text_box.tag_cget(
-    SELECTED_PHRASE_TAG, "background"
+    _selected_tag_for_color("빨강"), "background"
 )
 all_passed &= report(
     "미리보기 형광펜 기본이 빨강용인가",
@@ -253,11 +253,16 @@ view._underline_color_picker.set("파랑")
 # Combobox 의 .set() 은 선택 이벤트를 안 보낼 수 있어, 화면에서 고른 것과 같이 처리한다.
 view._on_underline_color_changed()
 window.update()
+all_passed &= report(
+    "파랑 선택 시 다음 드래그 색이 파랑인가",
+    view.preview_view._pending_color_name == "파랑",
+    view.preview_view._pending_color_name,
+)
 blue_highlight = view.preview_view._text_box.tag_cget(
-    SELECTED_PHRASE_TAG, "background"
+    _selected_tag_for_color("파랑"), "background"
 )
 all_passed &= report(
-    "파랑 선택 시 미리보기 형광펜이 바뀌는가",
+    "파랑 태그의 형광펜이 맞는가",
     blue_highlight == app_config.preview_highlight_for_name("파랑"),
     blue_highlight,
 )
@@ -520,7 +525,7 @@ all_passed &= report(
 preview.show_article("제7조", saved_preview_text)
 window.update()
 
-print("\n=== 3-5b. 빨간 표시 클릭으로 밑줄 취소 ===")
+print("\n=== 3-5b. 빨간 표시 왼쪽 클릭으로 밑줄 취소 ===")
 preview.show_article("제7조", sample_article)
 window.update()
 # 드래그 선택과 같은 경로: 구간을 표시하고 칩에 넣는다.
@@ -542,7 +547,7 @@ all_passed &= report(
 )
 removed = preview._try_remove_phrase_at(start)
 window.update()
-all_passed &= report("빨간 구간 클릭 삭제가 되는가", removed)
+all_passed &= report("빨간 구간 삭제가 되는가", removed)
 all_passed &= report(
     "미리보기 추적이 비었는가",
     len(preview._selected_phrase_ranges) == 0,
@@ -567,10 +572,34 @@ all_passed &= report(
     str(preview._selected_phrase_ranges),
 )
 all_passed &= report(
-    "안내 문구에 클릭 취소가 있는가",
-    "빨간 표시를 클릭하면" in preview._guide_label.cget("text"),
+    "안내 문구에 왼쪽 클릭 삭제가 있는가",
+    "왼쪽 클릭" in preview._guide_label.cget("text"),
     preview._guide_label.cget("text"),
 )
+all_passed &= report(
+    "안내 문구에 오른쪽 클릭 색 변경이 있는가",
+    "오른쪽 클릭" in preview._guide_label.cget("text"),
+    preview._guide_label.cget("text"),
+)
+# 밑줄 표시 위면 손가락 커서(hand2)로 바뀌는지 확인한다.
+preview._text_box.tag_add("sel", start, end)
+preview._on_drag_finished()
+window.update()
+preview._set_hover_cursor_for_index(start)
+all_passed &= report(
+    "밑줄 표시 위에 손가락 커서가 되는가",
+    str(preview._text_box.cget("cursor")) == "hand2",
+    str(preview._text_box.cget("cursor")),
+)
+preview._set_hover_cursor_for_index("1.0")
+all_passed &= report(
+    "일반 글자 위는 글자 커서인가",
+    str(preview._text_box.cget("cursor")) == "xterm",
+    str(preview._text_box.cget("cursor")),
+)
+preview.clear_selected_phrases()
+view._underline_phrases.clear()
+window.update()
 
 print("\n=== 3-6. 드래그 순번 표기 ===")
 # 같은 문구가 두 번 나오는 본문에서 두 번째를 고르면 '[2번째]' 가 붙어야 한다.
@@ -898,11 +927,21 @@ window.update()
 all_passed &= report("진행 화면으로 넘어갔는가",
                      window._progress_view.winfo_ismapped() == 1)
 
+# 중간 단계(내려받는 중) → 완료 → 실패 순으로 남겨, 진행 칸에 단계 글이 보이는지 본다.
+window._progress_view.show_progress(
+    0, 4, "제1조 [시행 2025. 2. 3.]", False, "",
+    stage_label="조문 내려받는 중", is_item_done=False,
+)
 window._progress_view.show_progress(1, 4, "제1조 [시행 2025. 2. 3.]", False, "")
 window._progress_view.show_progress(2, 4, "제7조 [시행 2025. 2. 3.]", True,
                                     "'없는 문구' 문구를 조문에서 찾지 못했습니다")
 window.update()
-all_passed &= report("진행 기록이 쌓이는가", True)
+log_text = window._progress_view._log_box.get("1.0", "end")
+all_passed &= report("진행 기록이 쌓이는가", "제1조" in log_text and "제7조" in log_text)
+all_passed &= report(
+    "중간 단계(내려받는 중)가 기록에 남는가",
+    "조문 내려받는 중" in log_text,
+)
 
 sample_result = CaptureRunResult(
     succeeded=[CapturedArticle(view._jobs[0].target_versions and None, Path("a.pdf"),
