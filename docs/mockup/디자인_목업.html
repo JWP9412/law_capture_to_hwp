@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>법령 조문 캡처 — 디자인 목업 (국가법령정보센터 스타일)</title>
+<!--
+  프로그램(tkinter)에 적용하기 전에 모양만 미리 보는 목업이다.
+  실제 프로그램 코드와는 연결돼 있지 않다.
+
+  색은 2026-11 리뉴얼된 국가법령정보센터 화면에서 실제로 읽어 온 값이다.
+  예시 본문은 프로그램이 받아 둔 「공동주택관리법」 제3조(2026. 7. 1. 시행본) PDF에서 옮겼다.
+
+  위쪽 단추:
+    [바뀐 뒤] / [지금 화면]  — 색·글꼴을 바꾸기 전과 후를 비교
+    [평평한 모서리] / [둥근 모서리] — tkinter 는 둥근 모서리를 기본으로 못 그려서,
+      실제 프로그램은 '평평한 모서리' 쪽에 가깝게 나온다. 둥근 쪽은 사이트 원래 모양.
+-->
+<style>
+  /* ---------- 바뀐 뒤: 국가법령정보센터 색 ---------- */
+  :root {
+    --font: "Pretendard GOV", "Noto Sans KR", "맑은 고딕", "Malgun Gothic", sans-serif;
+    --window-bg: #eef2f7;        /* 사이트 첫 화면 바탕 */
+    --card-bg: #ffffff;
+    --card-border: #cbced6;      /* 사이트 칸 구분선 */
+    --text: #1e2124;             /* 사이트 본문 글자 */
+    --text-sub: #464c53;         /* 사이트 보조 글자 */
+    --text-hint: #6e7377;        /* 사이트 흐린 글자 */
+    --danger: #b42318;
+    --primary: #063a74;          /* 사이트 [화면내 검색] 버튼 */
+    --primary-active: #001e4e;   /* 사이트 로고 글자 남색 */
+    --title: #001e4e;
+    --link: #2b6ad1;             /* 사이트 링크·개정 표시·선택 상자 테두리 */
+    --button-bg: #ffffff;
+    --button-border: #b1b8be;    /* 사이트 흰 버튼 테두리 */
+    --button-hover: #f8f9fb;
+    --selected-bg: #e2eaf7;      /* 사이트 연한 파랑 칸 */
+    --input-border: #b1b8be;
+    --header-display: flex;
+    --radius-button: 8px;        /* 프로그램 적용 목표(둥근 모서리) */
+    --radius-card: 12px;
+    --card-title-size: 15px;
+  }
+  body.flat { --radius-button: 0px; --radius-card: 0px; }
+
+  /* ---------- 지금 화면: ui/theme.py 현재 값 ---------- */
+  body.before {
+    --font: "맑은 고딕", "Malgun Gothic", sans-serif;
+    --window-bg: #f4f6fb;
+    --card-border: #d6dbe6;
+    --text: #1f2937;
+    --text-sub: #1f2937;
+    --text-hint: #6b7280;
+    --primary: #2563eb;
+    --primary-active: #1d4ed8;
+    --title: #1f2937;
+    --link: #1f2937;
+    --button-bg: #dcdad5;         /* clam 테마 기본 회색 단추 */
+    --button-border: #9e9a91;
+    --button-hover: #eeebe7;
+    --selected-bg: #ffffff;
+    --input-border: #9e9a91;
+    --header-display: none;
+    --card-title-size: 14px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: var(--font);
+    background: #3a3f47;
+    color: var(--text);
+    font-size: 13px;
+    padding: 18px 0 40px;
+  }
+
+  /* ---------- 목업 조작 막대 (프로그램에는 없음) ---------- */
+  .mock-controls {
+    width: 1180px; margin: 0 auto 12px; display: flex; gap: 8px; align-items: center;
+    color: #e5e7eb; font-family: "맑은 고딕", sans-serif;
+  }
+  .mock-controls .group { display: flex; border: 1px solid #6b7280; border-radius: 6px; overflow: hidden; }
+  .mock-controls button {
+    font: inherit; padding: 6px 14px; border: 0; background: transparent; color: #e5e7eb; cursor: pointer;
+  }
+  .mock-controls button.on { background: #e5e7eb; color: #111827; font-weight: 700; }
+  .mock-controls .note { margin-left: auto; font-size: 12px; color: #9ca3af; }
+
+  /* ---------- 창 ---------- */
+  .window {
+    width: 1180px; height: 780px; margin: 0 auto; background: var(--window-bg);
+    display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.45);
+  }
+  .titlebar {
+    height: 30px; background: #ffffff; border-bottom: 1px solid #e5e7eb;
+    display: flex; align-items: center; padding: 0 0 0 10px; font-size: 12px; color: #111;
+    font-family: "맑은 고딕", sans-serif;
+  }
+  .titlebar .icon { width: 16px; height: 16px; background: var(--primary); margin-right: 8px; }
+  .titlebar .caption-buttons { margin-left: auto; display: flex; }
+  .titlebar .caption-buttons span { width: 46px; text-align: center; line-height: 30px; }
+
+  /* ---------- 머리 띠 (새로 추가) ---------- */
+  .app-header {
+    display: var(--header-display);
+    height: 64px; background: #ffffff; border-bottom: 1px solid var(--card-border);
+    align-items: center; padding: 0 20px; flex-shrink: 0;
+  }
+  .app-header .brand { display: flex; flex-direction: column; line-height: 1.2; }
+  .app-header .brand small { font-size: 12px; color: var(--text-hint); }
+  .app-header .brand strong { font-size: 21px; font-weight: 700; color: var(--title); letter-spacing: -0.5px; }
+  .app-header .bar { width: 4px; height: 34px; background: var(--primary); margin-right: 12px; }
+  .app-header .meta { margin-left: auto; text-align: right; font-size: 12px; color: var(--text-hint); line-height: 1.5; }
+  .app-header .meta b { color: var(--link); font-weight: 500; }
+
+  /* ---------- 본문 두 칸 ---------- */
+  .body {
+    flex: 1; display: grid; grid-template-columns: 3fr 4fr; gap: 8px; padding: 12px; min-height: 0;
+  }
+  .column { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .column.left { overflow-y: auto; padding-right: 4px; }
+
+  /* ---------- 카드 ---------- */
+  .card {
+    background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-card);
+    padding: 10px 12px 12px; position: relative;
+  }
+  .card > .card-title {
+    font-size: var(--card-title-size); font-weight: 700; color: var(--title); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  body:not(.before) .card > .card-title .num {
+    display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center;
+    background: var(--primary); color: #fff; font-size: 12px; border-radius: var(--radius-button);
+  }
+  body.before .card > .card-title .num::after { content: "."; }
+
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .row:last-child { margin-bottom: 0; }
+  .label { width: 82px; flex-shrink: 0; color: var(--text); }
+  .grow { flex: 1; min-width: 0; }
+  .hint { color: var(--text-hint); font-size: 12px; line-height: 1.5; }
+  .danger { color: var(--danger); font-size: 12px; }
+  .indent { margin-left: 88px; }
+
+  /* ---------- 입력칸 ---------- */
+  .entry, .combo {
+    height: 28px; border: 1px solid var(--input-border); background: #fff; padding: 0 8px;
+    display: flex; align-items: center; color: var(--text); font: inherit;
+    border-radius: calc(var(--radius-button) / 2);
+  }
+  .entry.focus, .combo.focus { border-color: var(--link); box-shadow: 0 0 0 1px var(--link) inset; }
+  body.before .entry.focus { border-color: #4a6984; box-shadow: none; }
+  .entry.placeholder { color: var(--text-hint); }
+  .combo { justify-content: space-between; }
+  .combo::after { content: "▾"; color: var(--text-sub); margin-left: 6px; }
+  .combo.disabled { background: #f3f4f6; color: var(--text-hint); }
+  .date { width: 100px; }
+
+  /* ---------- 버튼 ---------- */
+  .btn {
+    height: 28px; padding: 0 12px; border: 1px solid var(--button-border); background: var(--button-bg);
+    color: var(--text); font: inherit; border-radius: var(--radius-button); cursor: pointer; white-space: nowrap;
+  }
+  .btn:hover { background: var(--button-hover); }
+  .btn.primary {
+    background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 500;
+    height: 34px; padding: 0 22px; font-size: 14px;
+  }
+  .btn.primary:hover { background: var(--primary-active); }
+  body.before .btn.primary { font-weight: 700; }
+  .btn.small { height: 24px; padding: 0 8px; font-size: 12px; color: var(--text-sub); }
+  .btn.icon { width: 30px; padding: 0; }
+
+  /* 라디오 */
+  .radio { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+  .radio i {
+    width: 14px; height: 14px; border: 1px solid var(--input-border); border-radius: 50%; background: #fff;
+    display: inline-block; position: relative;
+  }
+  .radio.on i { border-color: var(--link); }
+  .radio.on i::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--link); }
+  body.before .radio.on i { border-color: #4a6984; }
+  body.before .radio.on i::after { background: #4a6984; }
+
+  /* v 체크 단추 (VCheckbutton) */
+  .vcheck {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--button-border);
+    background: #fff; color: var(--text); border-radius: var(--radius-button);
+  }
+  .vcheck.on { background: var(--selected-bg); border-color: var(--link); color: var(--title); font-weight: 500; }
+  body.before .vcheck { border-style: groove; border-width: 2px; }
+  body.before .vcheck.on { background: #fff; border-color: #d6dbe6; color: var(--text); font-weight: 400; }
+
+  /* ---------- 개정본 목록 ---------- */
+  .version-list { border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 6px; }
+  .version {
+    display: flex; gap: 8px; align-items: center; padding: 4px 6px; font-variant-numeric: tabular-nums;
+    border-radius: calc(var(--radius-button) / 2);
+  }
+  .version.on { background: var(--selected-bg); }
+  body.before .version.on { background: transparent; }
+  .version .box {
+    width: 18px; text-align: center; border: 1px solid var(--button-border); background: #fff; line-height: 16px; font-size: 11px;
+  }
+  .version.on .box { border-color: var(--link); color: var(--link); font-weight: 700; }
+  body.before .version.on .box { color: var(--text); border-color: var(--button-border); }
+  .version .date-text { width: 82px; }
+  .version .law-no { color: var(--text-sub); flex: 1; }
+  .badge { font-size: 11px; padding: 1px 6px; border: 1px solid var(--card-border); color: var(--text-hint); border-radius: var(--radius-button); }
+  .badge.now { border-color: var(--link); color: var(--link); background: #fff; }
+  body.before .badge { border: 0; padding: 0; }
+  body.before .badge.now { color: var(--text); }
+
+  /* 밑줄 문구 칩 */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; padding: 6px; background: var(--window-bg); }
+  body.before .chips { background: #fff; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; background: #fff;
+    border: 1px solid #f3b4b4; color: #9b1c1c; border-radius: var(--radius-button);
+  }
+  .chip b { font-weight: 400; color: var(--text-hint); cursor: pointer; padding: 0 4px; }
+
+  /* 대기 목록 */
+  .job-list { display: flex; gap: 6px; }
+  .listbox { flex: 1; border: 1px solid var(--input-border); background: #fff; height: 96px; padding: 2px 0; }
+  .listbox div { padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .listbox div.sel { background: var(--link); color: #fff; }
+  body.before .listbox div.sel { background: #4a6984; }
+  .job-buttons { display: flex; flex-direction: column; gap: 6px; }
+
+  /* ---------- 조문 미리보기 ---------- */
+  .preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .preview-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+  .preview-toolbar .spacer { flex: 1; }
+  .preview-toolbar .article-label { color: var(--text-hint); margin-left: 4px; }
+  .paper {
+    flex: 1; border: 1px solid var(--card-border); background: #fff; padding: 14px 18px; overflow-y: auto;
+    line-height: 1.85; font-size: 13.5px; color: var(--text);
+  }
+  body.before .paper { line-height: 1.55; font-size: 13px; padding: 6px 8px; }
+  .paper .law-title { font-size: 17px; font-weight: 700; color: var(--title); margin-bottom: 2px; }
+  .paper .law-meta { font-size: 12px; color: var(--link); margin-bottom: 12px; }
+  body.before .paper .law-title { font-size: 13px; color: var(--text); }
+  body.before .paper .law-meta { color: var(--text); font-size: 13px; }
+  .paper .jo-title { font-weight: 700; }
+  body.before .paper .jo-title { font-weight: 400; }
+  .paper .rev { color: var(--link); font-size: 12px; }
+  body.before .paper .rev { font-size: 13px; }
+  .paper .item { padding-left: 1.2em; text-indent: -1.2em; }
+  .paper mark { background: #ffe0e0; color: inherit; padding: 0 1px; }
+  .preview .hint { margin-top: 6px; }
+
+  /* ---------- 아래 고정 줄 ---------- */
+  .footer {
+    border-top: 1px solid var(--card-border); background: #fff; padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  body.before .footer { background: var(--window-bg); }
+  .footer .spacer { flex: 1; }
+  .footer .summary { color: var(--text-hint); margin-right: 4px; }
+  .footer .summary b { color: var(--title); }
+  body.before .footer .summary b { color: var(--text-hint); font-weight: 400; }
+
+  /* ---------- 색 견본 (프로그램에는 없음) ---------- */
+  .palette {
+    width: 1180px; margin: 22px auto 0; background: #fff; padding: 16px 20px; font-family: "맑은 고딕", sans-serif;
+  }
+  .palette h3 { margin: 0 0 10px; font-size: 14px; }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .swatch { font-size: 12px; color: #374151; }
+  .swatch i { display: block; height: 40px; border: 1px solid #e5e7eb; margin-bottom: 4px; }
+  .swatch code { color: #6b7280; }
+</style>
+</head>
+<body>
+
+<div class="mock-controls">
+  <div class="group" id="themeGroup">
+    <button class="on" data-theme="after">바뀐 뒤</button>
+    <button data-theme="before">지금 화면</button>
+  </div>
+  <div class="group" id="cornerGroup">
+    <button class="on" data-corner="rounded">둥근 모서리 (프로그램 적용 목표)</button>
+    <button data-corner="flat">평평한 모서리</button>
+  </div>
+  <span class="note">목업 전용 막대 — 프로그램에는 없습니다</span>
+</div>
+
+<div class="window">
+  <div class="titlebar">
+    <span class="icon"></span>법령 조문 캡처
+    <div class="caption-buttons"><span>─</span><span>☐</span><span>✕</span></div>
+  </div>
+
+  <!-- 새로 추가하는 머리 띠. 사이트 머리 영역(흰 바탕 + 두 줄 제목)을 따왔다. 정부 상징(태극)은 넣지 않는다. -->
+  <header class="app-header">
+    <span class="bar"></span>
+    <div class="brand">
+      <small>건설 하자소송 준비서면용</small>
+      <strong>법령 조문 캡처</strong>
+    </div>
+    <div class="meta">
+      자료 출처: <b>국가법령정보센터</b><br>
+      버전 2.1.0
+    </div>
+  </header>
+
+  <main class="body">
+    <!-- ===== 왼쪽 열 ===== -->
+    <section class="column left">
+
+      <div class="card">
+        <div class="card-title"><span class="num">1</span> 법령 찾기</div>
+        <div class="row">
+          <span class="label">법령/고시명</span>
+          <div class="entry focus grow">공동주택관리법</div>
+          <button class="btn">검색</button>
+        </div>
+        <div class="row indent"><div class="combo grow">공동주택관리법 (법률)</div></div>
+        <div class="row indent hint">검색 결과 3건 — 목록에서 고르세요</div>
+        <div class="row">
+          <span class="label">즐겨찾기</span>
+          <div class="combo grow">공동주택관리법</div>
+          <button class="btn">설정</button>
+        </div>
+        <div class="row">
+          <span class="label">사용자 지정 SET</span>
+          <div class="combo grow">하자소송 기본 조문</div>
+          <button class="btn">설정</button>
+        </div>
+        <div class="row indent">
+          <span>기준일</span>
+          <div class="entry date">2026-11-20</div>
+          <button class="btn">이 시점으로 담기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="num">2</span> 어느 시점의 판</div>
+        <div class="row">
+          <span class="radio"><i></i>특정 시점</span>
+          <span class="radio on"><i></i>기간</span>
+          <span class="radio"><i></i>전체 기간</span>
+        </div>
+        <div class="row">
+          <div class="entry date">2025-01-01</div> ~ <div class="entry date">2026-12-31</div>
+          <button class="btn">개정본 찾기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">개정본 선택 (오래된 순)</div>
+        <span class="vcheck">&nbsp; 전체 선택</span>
+        <div class="hint" style="margin:4px 0 0 2px">4개 중 1개 선택</div>
+        <div class="version-list">
+          <div class="version"><span class="box">&nbsp;</span><span class="date-text">2025. 1. 1.</span><span class="law-no">법률 제20385호, 2024. 3. 19., 타법개정</span><span class="badge">구</span></div>
+          <div class="version"><span class="box">&nbsp;</span><span class="date-text">2025. 10. 1.</span><span class="law-no">법률 제21065호, 2025. 10. 1., 타법개정</span><span class="badge">구</span></div>
+          <div class="version"><span class="box">&nbsp;</span><span class="date-text">2026. 3. 3.</span><span class="law-no">법률 제21166호, 2025. 12. 2., 일부개정</span><span class="badge">구</span></div>
+          <div class="version on"><span class="box">v</span><span class="date-text">2026. 7. 1.</span><span class="law-no">법률 제21447호, 2026. 3. 5., 타법개정</span><span class="badge now">현행</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="num">3</span> 조문과 밑줄</div>
+        <div class="row">
+          <span class="label">조문 번호</span>
+          <div class="entry grow">3</div>
+          <button class="btn">미리보기</button>
+          <button class="btn">전체보기</button>
+        </div>
+        <div class="row hint">예: 1 또는 1, 2 또는 1-3 또는 32의2</div>
+        <div class="row">
+          <span class="label">밑줄</span>
+          <div class="entry grow"></div>
+          <button class="btn">추가</button>
+          <button class="btn">밑줄 초기화</button>
+        </div>
+        <div class="row">
+          <span class="label">밑줄 색</span>
+          <div class="combo" style="width:90px">빨강</div>
+          <span class="hint">(기본 빨강 · 미리보기 형광펜과 PDF 밑줄에 적용)</span>
+        </div>
+        <div class="chips"><span class="chip">안전하고 효율적으로 관리<b>✕</b></span></div>
+        <div class="hint" style="margin-top:4px">조문 [미리보기] 또는 [전체보기]에서 문구를 드래그하거나, 그대로 적어주세요.</div>
+        <div class="row" style="margin-top:8px">
+          <span class="vcheck on">v 캡션 넣기</span>
+          <span class="vcheck on">v 테두리 넣기</span>
+          <span class="grow"></span>
+          <button class="btn">＋ 이 조건을 목록에 담기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="num">4</span> 담은 작업 대기 목록</div>
+        <div class="job-list">
+          <div class="listbox">
+            <div class="sel">공동주택관리법 · 2026. 7. 1. 시행 · 제3조 · 밑줄 1개</div>
+            <div>공동주택 하자의 조사, 보수비용 산정 및 하자판정기준 · 2025. 2. 3. 시행 · 제1조</div>
+          </div>
+          <div class="job-buttons">
+            <button class="btn">선택 삭제</button>
+            <button class="btn">현재 SET에 추가</button>
+            <button class="btn">전체 삭제</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:4px">그림 2개가 만들어집니다</div>
+      </div>
+    </section>
+
+    <!-- ===== 오른쪽 열 ===== -->
+    <section class="column">
+      <div class="card preview">
+        <div class="card-title">조문 미리보기</div>
+        <div class="preview-toolbar">
+          <span>어느 판:</span>
+          <div class="combo" style="width:230px">2026. 7. 1. 시행 (현행)</div>
+          <span class="article-label">제3조</span>
+          <span class="spacer"></span>
+          <button class="btn icon">▲</button>
+          <button class="btn icon">▼</button>
+          <button class="btn">찾기</button>
+          <button class="btn">원문 보기</button>
+        </div>
+        <div class="paper">
+          <div class="law-title">공동주택관리법</div>
+          <div class="law-meta">[시행 2026. 7. 1.] [법률 제21447호, 2026. 3. 5., 타법개정]</div>
+          <p style="margin:0 0 4px">
+            <span class="jo-title">제3조(국가 등의 의무)</span>
+            ① 국가 및 지방자치단체는 공동주택의 관리에 관한 정책을 수립ㆍ시행할 때에는 다음 각 호의 사항을 위하여 노력하여야 한다.
+            <span class="rev">&lt;개정 2025. 12. 2.&gt;</span>
+          </p>
+          <div class="item">1. 공동주택에 거주하는 입주자등이 쾌적하고 살기 좋은 주거생활을 할 수 있도록 할 것</div>
+          <div class="item">2. 공동주택이 투명하고 체계적이며 평온하게 관리될 수 있도록 할 것</div>
+          <div class="item">3. 안전사고를 예방하고 재해 및 재난 등으로부터 입주자등을 보호하기 위하여 공동주택이 <mark>안전하고 효율적으로 관리</mark>될 수 있도록 할 것</div>
+          <div class="item">4. 공동주택의 관리와 관련한 산업이 건전한 발전을 꾀할 수 있도록 할 것</div>
+          <p style="margin:4px 0">② 관리주체는 공동주택을 효율적이고 안전하게 관리하여야 한다.</p>
+          <p style="margin:4px 0">③ 입주자등은 공동체 생활의 질서가 유지될 수 있도록 이웃을 배려하고 관리주체의 업무에 협조하여야 한다.</p>
+        </div>
+        <div class="hint">밑줄 칠 부분을 마우스로 드래그하세요. 여러 번 고를 수 있습니다. (찾기 또는 Ctrl+F) 빨간 표시를 클릭하면 그 밑줄을 취소합니다.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="num">5</span> 한글 파일 저장 위치 - 현재는 임시 폴더에 저장됩니다.</div>
+        <div class="row" style="opacity:.55">
+          <span class="label">대상 한글 파일</span>
+          <div class="entry placeholder grow">비워두면 새 문서를 만듭니다</div>
+          <button class="btn">찾아보기</button>
+          <button class="btn">폴더 열기</button>
+        </div>
+        <div class="hint">이 단계는 현재 사용하지 않습니다. 기본 저장 규칙으로 자동 저장됩니다.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <button class="btn">입력 값 리셋</button>
+    <span class="spacer"></span>
+    <span class="summary">담은 작업 <b>2건</b> · 그림 2개</span>
+    <button class="btn">저장된 폴더 열기</button>
+    <button class="btn primary">실행</button>
+  </footer>
+</div>
+
+<div class="palette">
+  <h3>국가법령정보센터에서 따온 색 (바뀐 뒤 기준)</h3>
+  <div class="swatches">
+    <div class="swatch"><i style="background:#063a74"></i>주 버튼 <code>#063a74</code></div>
+    <div class="swatch"><i style="background:#001e4e"></i>제목·눌림 <code>#001e4e</code></div>
+    <div class="swatch"><i style="background:#2b6ad1"></i>개정 표시·선택 <code>#2b6ad1</code></div>
+    <div class="swatch"><i style="background:#e2eaf7"></i>선택된 줄 <code>#e2eaf7</code></div>
+    <div class="swatch"><i style="background:#eef2f7"></i>창 바탕 <code>#eef2f7</code></div>
+    <div class="swatch"><i style="background:#ffffff"></i>카드 바탕 <code>#ffffff</code></div>
+    <div class="swatch"><i style="background:#1e2124"></i>본문 글자 <code>#1e2124</code></div>
+    <div class="swatch"><i style="background:#464c53"></i>보조 글자 <code>#464c53</code></div>
+    <div class="swatch"><i style="background:#6e7377"></i>안내 글자 <code>#6e7377</code></div>
+    <div class="swatch"><i style="background:#b1b8be"></i>버튼·입력칸 테두리 <code>#b1b8be</code></div>
+    <div class="swatch"><i style="background:#cbced6"></i>카드 테두리 <code>#cbced6</code></div>
+    <div class="swatch"><i style="background:#ffe0e0"></i>밑줄 형광펜(그대로) <code>#ffe0e0</code></div>
+  </div>
+</div>
+
+<script>
+  // 목업 조작 막대: 바뀐 뒤/지금, 평평한/둥근 모서리 전환
+  function bindToggle(groupId, attribute, apply) {
+    const group = document.getElementById(groupId);
+    group.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      group.querySelectorAll("button").forEach((each) => each.classList.toggle("on", each === button));
+      apply(button.dataset[attribute]);
+    });
+  }
+  bindToggle("themeGroup", "theme", (value) => document.body.classList.toggle("before", value === "before"));
+  bindToggle("cornerGroup", "corner", (value) => document.body.classList.toggle("flat", value === "flat"));
+  // 처음 열면 둥근 모서리(프로그램 목표)가 보이게
+  document.body.classList.remove("flat");
+</script>
+</body>
+</html>

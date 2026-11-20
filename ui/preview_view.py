@@ -9,6 +9,7 @@
 이 파일은 '보여주기' 와 '고른 것을 알려주기' 만 한다.
 조문을 실제로 불러오는 일은 controller 에게 부탁한다.
 """
+import re
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import ttk
@@ -19,6 +20,8 @@ from core.article_number import (
     read_article_heading,
 )
 from core.models import LawVersion
+from ui import theme
+from ui.widgets import RoundedCardShell
 
 SELECTED_PHRASE_TAG = "고른부분"
 # 기본은 빨강용 옅은 형광펜. 밑줄 색을 바꾸면 set_selected_highlight_color 로 맞춘다.
@@ -29,6 +32,19 @@ FOUND_TAG = "찾은곳"
 FOUND_BACKGROUND = "#fff59d"  # 옅은 노랑
 CURRENT_FOUND_TAG = "지금찾은곳"
 CURRENT_FOUND_BACKGROUND = "#ffd54f"  # 진한 노랑 — 지금 보고 있는 곳
+
+# 사이트 본문처럼 조 제목·개정 표시를 구분하는 태그.
+ARTICLE_HEADING_TAG = "조제목"
+REVISION_MARK_TAG = "개정표시"
+
+# 조 제목: 제3조(…), 제32조의2(…)
+_ARTICLE_HEADING_PATTERN = re.compile(
+    r"제\d+조(?:의\d+)?(?:\([^)]*\))?"
+)
+# <개정 …>, [본조신설 …], [제목개정 …], [전문개정 …] 등
+_REVISION_MARK_PATTERN = re.compile(
+    r"<개정[^>]*>|\[(?:본조신설|제목개정|전문개정|삭제)[^\]]*\]"
+)
 
 GUIDE_BEFORE_LOADING = (
     "조문 번호를 넣고 [미리보기] 를 누르거나, [전체보기] 로 본문 전체를 볼 수 있습니다. "
@@ -47,8 +63,14 @@ GUIDE_AFTER_FULL_LOADING = (
 )
 
 
-class PreviewView(ttk.LabelFrame):
-    """조문 미리보기 패널."""
+class PreviewView(RoundedCardShell):
+    """
+    조문 미리보기 패널.
+
+    왜 LabelFrame / ttk 그림 테두리가 아닌가:
+      큰 카드에 ttk image border 를 쓰면 화면 그리기가 멈출 수 있다.
+      RoundedCardShell(배경 그림) 위에 제목·본문을 올린다.
+    """
 
     def __init__(
         self,
@@ -57,7 +79,10 @@ class PreviewView(ttk.LabelFrame):
         on_open_original: Callable[[], None],
         on_phrase_removed: Callable[[str], None] | None = None,
     ):
-        super().__init__(parent, text="조문 미리보기", padding=6)
+        super().__init__(parent, padding=10)
+        ttk.Label(self.panel, text="조문 미리보기", style="CardTitle.TLabel").pack(
+            anchor="w", pady=(0, 6)
+        )
         self._on_phrase_selected = on_phrase_selected
         self._on_open_original = on_open_original
         # 빨간 표시를 클릭해 지울 때 왼쪽 칩 목록도 같이 빼기 위한 알림.
@@ -92,15 +117,17 @@ class PreviewView(ttk.LabelFrame):
     # ------------------------------------------------------------------
 
     def _build_header_row(self) -> None:
-        row = ttk.Frame(self)
+        row = ttk.Frame(self.panel, style="Card.TFrame")
         row.pack(fill="x", pady=(0, 4))
 
-        ttk.Label(row, text="어느 판:").pack(side="left")
+        ttk.Label(row, text="어느 판:", style="Card.TLabel").pack(side="left")
         self._version_picker = ttk.Combobox(row, state="disabled", width=28)
         self._version_picker.pack(side="left", padx=4)
         self._version_picker.bind("<<ComboboxSelected>>", self._on_version_changed)
 
-        self._article_label = ttk.Label(row, text="", foreground="gray")
+        self._article_label = ttk.Label(
+            row, text="", style="Card.Hint.TLabel"
+        )
         self._article_label.pack(side="left", padx=6)
 
         # side=right 는 먼저 pack 한 것이 더 오른쪽에 온다.
@@ -132,9 +159,9 @@ class PreviewView(ttk.LabelFrame):
         평소에는 숨겨 두고, 필요할 때만 헤더와 본문 사이에 끼워 넣는다.
         웹브라우저나 한글의 찾기와 같은 흐름을 맞추기 위해서다.
         """
-        self._find_bar = ttk.Frame(self)
+        self._find_bar = ttk.Frame(self.panel, style="Card.TFrame")
 
-        ttk.Label(self._find_bar, text="찾기").pack(side="left")
+        ttk.Label(self._find_bar, text="찾기", style="Card.TLabel").pack(side="left")
         self._find_entry = ttk.Entry(self._find_bar, width=20)
         self._find_entry.pack(side="left", padx=4)
         self._find_entry.bind("<KeyRelease>", self._on_find_query_changed)
@@ -155,25 +182,33 @@ class PreviewView(ttk.LabelFrame):
         ).pack(side="left", padx=(4, 0))
 
         self._find_status_label = ttk.Label(
-            self._find_bar, text="", foreground="gray"
+            self._find_bar, text="", style="Card.Hint.TLabel"
         )
         self._find_status_label.pack(side="left", padx=8)
 
     def _build_text_area(self) -> None:
-        text_frame = ttk.Frame(self)
+        text_frame = ttk.Frame(self.panel, style="Card.TFrame")
         text_frame.pack(fill="both", expand=True)
 
         # state 를 normal 로 두는 이유: disabled 로 하면 드래그 선택이 안 된다.
         # 대신 키 입력을 막아 사용자가 내용을 고치지 못하게 한다.
+        # 테두리는 카드가 맡기므로 본문 칸은 테두리 없이 둔다.
+        # (tk.Text 는 둥근 모서리를 못 그려서 카드 안에 넣는 넣는다)
         self._text_box = tk.Text(
             text_frame,
             height=16,
             wrap="word",
-            font=("맑은 고딕", 10),
+            font=theme.body_font(10),
             relief="flat",
-            borderwidth=1,
-            padx=8,
-            pady=6,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=14,
+            pady=10,
+            background=theme.CARD_BACKGROUND,
+            foreground=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY,
+            spacing1=2,
+            spacing3=4,
         )
         scrollbar = ttk.Scrollbar(text_frame, command=self._text_box.yview)
         self._text_box.configure(yscrollcommand=scrollbar.set)
@@ -187,6 +222,15 @@ class PreviewView(ttk.LabelFrame):
         self._text_box.tag_configure(
             CURRENT_FOUND_TAG, background=CURRENT_FOUND_BACKGROUND
         )
+        # 사이트 본문처럼 조 제목은 굵게, 개정 표시는 파랑 작은 글씨.
+        self._text_box.tag_configure(
+            ARTICLE_HEADING_TAG, font=theme.body_font(10, "bold")
+        )
+        self._text_box.tag_configure(
+            REVISION_MARK_TAG,
+            foreground=theme.LINK_BLUE,
+            font=theme.body_font(9),
+        )
         # 누른 위치와 뗀 위치로 클릭(밑줄 취소) / 드래그(밑줄 추가)를 나눈다.
         self._text_box.bind("<ButtonPress-1>", self._on_pointer_pressed)
         self._text_box.bind("<ButtonRelease-1>", self._on_pointer_released)
@@ -198,7 +242,9 @@ class PreviewView(ttk.LabelFrame):
         self.bind_all("<Control-F>", self._show_find_bar_if_focused)
 
     def _build_guide_label(self) -> None:
-        self._guide_label = ttk.Label(self, text=GUIDE_BEFORE_LOADING, style="Hint.TLabel")
+        self._guide_label = ttk.Label(
+            self.panel, text=GUIDE_BEFORE_LOADING, style="Card.Hint.TLabel"
+        )
         self._guide_label.pack(fill="x", pady=(4, 0))
 
     def scroll_text_by_wheel(self, delta: int) -> None:
@@ -321,7 +367,7 @@ class PreviewView(ttk.LabelFrame):
         self._heading_cursor = None
         self._article_label.config(text=article_label)
         self._replace_text("")
-        self._guide_label.config(text=GUIDE_WHILE_LOADING, foreground="gray")
+        self._guide_label.config(text=GUIDE_WHILE_LOADING)
 
     def show_article(
         self, article_label: str, text: str, is_full_view: bool = False
@@ -331,13 +377,14 @@ class PreviewView(ttk.LabelFrame):
         self._article_label.config(text=article_label)
         self._replace_text(text)
         guide = GUIDE_AFTER_FULL_LOADING if is_full_view else GUIDE_AFTER_LOADING
-        self._guide_label.config(text=guide, foreground="gray")
+        self._guide_label.config(text=guide)
 
     def show_failure(self, message: str) -> None:
         self._is_full_view_mode = False
         self._replace_text("")
         self._guide_label.config(
-            text=f"{message}\n밑줄 문구는 직접 적어 넣으셔도 됩니다.", foreground="red"
+            text=f"{message}\n밑줄 문구는 직접 적어 넣으셔도 됩니다.",
+            style="Card.Danger.TLabel",
         )
 
     def clear_selected_phrases(self) -> None:
@@ -408,7 +455,9 @@ class PreviewView(ttk.LabelFrame):
         """찾기 막대를 헤더와 본문 사이에 끼워 넣고 입력칸으로 커서를 보낸다."""
         if not self._is_find_bar_visible:
             # pack 순서를 헤더 바로 다음으로 고정한다.
-            self._find_bar.pack(fill="x", pady=(0, 4), after=self.winfo_children()[0])
+            # panel 자식: [제목, 헤더줄, 본문, 안내] — 헤더줄(1번) 뒤에 끼운다.
+            header_row = self.panel.winfo_children()[1]
+            self._find_bar.pack(fill="x", pady=(0, 4), after=header_row)
             self._is_find_bar_visible = True
         self._find_entry.focus_set()
         self._find_entry.selection_range(0, tk.END)
@@ -619,7 +668,7 @@ class PreviewView(ttk.LabelFrame):
         self._replace_text("")
         self._guide_label.config(
             text="다른 판을 골랐습니다. [미리보기] 또는 [전체보기] 를 다시 눌러주세요.",
-            foreground="gray",
+            style="Card.Hint.TLabel",
         )
 
     def _replace_text(self, text: str) -> None:
@@ -628,3 +677,23 @@ class PreviewView(ttk.LabelFrame):
         self._text_box.delete("1.0", tk.END)
         if text:
             self._text_box.insert("1.0", text)
+            self._apply_law_text_styles(text)
+
+    def _apply_law_text_styles(self, text: str) -> None:
+        """
+        사이트 본문처럼 조 제목·개정 표시에 모양을 입힌다.
+
+        왜 정규식으로 찾는가:
+          미리보기에 들어오는 글은 이미 만들어진 문자열이라,
+          태그를 붙일 위치를 글자 내용으로만 알 수 있다.
+          조 제목·개정 표시 형식이 법령정보센터에서 거의 고정돼 있어
+          이 두 패턴이면 충분하다.
+        """
+        for match in _ARTICLE_HEADING_PATTERN.finditer(text):
+            start = f"1.0+{match.start()}c"
+            end = f"1.0+{match.end()}c"
+            self._text_box.tag_add(ARTICLE_HEADING_TAG, start, end)
+        for match in _REVISION_MARK_PATTERN.finditer(text):
+            start = f"1.0+{match.start()}c"
+            end = f"1.0+{match.end()}c"
+            self._text_box.tag_add(REVISION_MARK_TAG, start, end)

@@ -41,7 +41,14 @@ from ui.capture_set_memory_dialog import CaptureSetMemoryDialog
 from ui.favorites_dialog import FavoritesSettingsDialog
 from ui.preview_view import PreviewView
 from ui import theme
-from ui.widgets import HintEntry, StepCard, VCheckbutton, install_auto_wrap
+from ui.widgets import (
+    CardPanel,
+    HintEntry,
+    RoundedCardShell,
+    StepCard,
+    VCheckbutton,
+    install_auto_wrap,
+)
 
 PERIOD_MODE = "기간 안의 모든 개정본"
 SINGLE_DATE_MODE = "특정 시점 하나"
@@ -50,6 +57,13 @@ ALL_TIME_MODE = "전체 기간"
 # 개정본 목록이 창을 밀어내지 않도록 목록만 스크롤되게 한다.
 # 「주택법」처럼 172개가 나와도 창 크기는 그대로다.
 VERSION_LIST_VISIBLE_HEIGHT_IN_PIXELS = 140
+
+# 창·목록 폭이 이만큼(픽셀) 이상 벌어질 때만 안쪽 폭을 다시 맞춘다.
+# 1픽셀마다 맞추면 둥근 버튼 그림이 매번 다시 늘어나 버벅인다.
+LAYOUT_WIDTH_STEP_PIXELS = 10
+
+# 손을 떼면 최종 폭을 한 번 더 맞추기까지의 대기(밀리초).
+LAYOUT_WIDTH_FINALIZE_DELAY_MS = 100
 
 # 이 개수 이상이면 '필요한 것만 체크하세요' 안내를 눈에 띄게 보여준다.
 MANY_VERSIONS_WARNING_THRESHOLD = 20
@@ -124,7 +138,13 @@ class InputView(ttk.Frame):
         # 모든 카드(와 미리보기)의 안내문이 카드 폭에 맞춰 줄바꿈되게 한다.
         # 이게 없으면 긴 안내문이 카드를 창보다 넓게 만들어 버튼이 잘린다.
         for card in _iter_widgets(self):
-            if isinstance(card, ttk.LabelFrame):
+            # 둥근 카드(StepCard/CardPanel)와 예전 LabelFrame 모두 줄바꿈 적용
+            style_name = ""
+            try:
+                style_name = str(card.cget("style"))
+            except tk.TclError:
+                pass
+            if isinstance(card, (RoundedCardShell, PreviewView)) or style_name == "Card.TLabelframe":
                 install_auto_wrap(card)
 
     @property
@@ -139,10 +159,11 @@ class InputView(ttk.Frame):
     def _build_law_search_row(self) -> None:
         card = StepCard(self._left_column, 1, "법령 찾기")
         card.pack(fill="x", pady=(0, 8))
-        card.grid_columnconfigure(1, weight=1)
+        body = card.body
+        body.grid_columnconfigure(1, weight=1)
 
-        ttk.Label(card, text="법령/고시명").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        row = ttk.Frame(card)
+        ttk.Label(body, text="법령/고시명", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        row = ttk.Frame(body, style='Card.TFrame')
         row.grid(row=0, column=1, sticky="ew")
         row.grid_columnconfigure(0, weight=1)
 
@@ -154,22 +175,22 @@ class InputView(ttk.Frame):
         # 검색 결과를 고르는 칸.
         # 이름 일부로 찾으면 여러 건이 나오는 경우가 많아서
         # (예: '공동' 으로 찾으면 30건 넘게 나온다) 직접 고를 수 있어야 한다.
-        picker_row = ttk.Frame(card)
+        picker_row = ttk.Frame(body, style='Card.TFrame')
         picker_row.grid(row=1, column=1, sticky="ew", pady=(6, 0))
         self._law_picker = ttk.Combobox(picker_row, state="disabled")
         self._law_picker.pack(fill="x")
         self._law_picker.bind("<<ComboboxSelected>>", self._on_law_chosen)
 
         self._search_status_label = ttk.Label(
-            card, text="법령·고시 이름을 넣고 [검색]을 누르세요", style="Hint.TLabel"
+            body, text="법령·고시 이름을 넣고 [검색]을 누르세요", style="Card.Hint.TLabel"
         )
         self._search_status_label.grid(row=2, column=1, sticky="w", pady=(6, 0))
 
         # 자주 쓰는 법령은 Combobox 로 바로 고르거나, [설정] 창에서 관리한다.
-        favorites_row = ttk.Frame(card)
+        favorites_row = ttk.Frame(body, style='Card.TFrame')
         favorites_row.grid(row=3, column=1, sticky="ew", pady=(8, 0))
         favorites_row.grid_columnconfigure(0, weight=1)
-        ttk.Label(card, text="즐겨찾기").grid(
+        ttk.Label(body, text="즐겨찾기", style="Card.TLabel").grid(
             row=3, column=0, sticky="nw", padx=(0, 8), pady=(8, 0)
         )
         self._favorites_picker = ttk.Combobox(favorites_row, state="disabled")
@@ -181,15 +202,15 @@ class InputView(ttk.Frame):
         ttk.Label(
             favorites_row,
             text="목록에서 고르거나 [설정]에서 추가·제거·적용",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         # 즐겨찾기는 법령 하나. 그 아래는 서면 단위로 묶은 캡처 세트다.
         # 세트에는 법령·조문·밑줄만 있고, 시점은 여기서 기준일로 넣는다.
-        memory_row = ttk.Frame(card)
+        memory_row = ttk.Frame(body, style='Card.TFrame')
         memory_row.grid(row=4, column=1, sticky="ew", pady=(8, 0))
         memory_row.grid_columnconfigure(0, weight=1)
-        ttk.Label(card, text="사용자 지정 SET").grid(
+        ttk.Label(body, text="사용자 지정 SET", style="Card.TLabel").grid(
             row=4, column=0, sticky="nw", padx=(0, 8), pady=(8, 0)
         )
         self._capture_memory_picker = ttk.Combobox(memory_row, state="disabled")
@@ -198,9 +219,9 @@ class InputView(ttk.Frame):
             memory_row, text="설정", command=self._open_capture_memory_settings
         ).grid(row=0, column=1, padx=(6, 0))
 
-        apply_row = ttk.Frame(memory_row)
+        apply_row = ttk.Frame(memory_row, style="Card.TFrame")
         apply_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        ttk.Label(apply_row, text="기준일").pack(side="left")
+        ttk.Label(apply_row, text="기준일", style="Card.TLabel").pack(side="left")
         self._capture_memory_date_entry = ttk.Entry(apply_row, width=12)
         self._capture_memory_date_entry.insert(0, date.today().isoformat())
         self._capture_memory_date_entry.pack(side="left", padx=(6, 0))
@@ -210,7 +231,7 @@ class InputView(ttk.Frame):
         ttk.Label(
             memory_row,
             text="세트에 넣어 둔 법령·조문·밑줄을, 이 날짜의 판으로 담은 목록에 넣습니다.",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
             wraplength=360,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
@@ -224,9 +245,10 @@ class InputView(ttk.Frame):
         """
         card = StepCard(self._left_column, 2, "어느 시점의 판")
         card.pack(fill="x", pady=(0, 8))
-        card.grid_columnconfigure(0, weight=1)
+        body = card.body
+        body.grid_columnconfigure(0, weight=1)
 
-        row = ttk.Frame(card)
+        row = ttk.Frame(body, style='Card.TFrame')
         row.grid(row=0, column=0, sticky="ew", pady=(0, 6))
 
         self._mode = tk.StringVar(value=PERIOD_MODE)
@@ -240,7 +262,7 @@ class InputView(ttk.Frame):
             ).pack(side="left", padx=(0, 10))
 
         # 날짜 칸과 찾기 버튼을 담는 줄. 방식에 따라 안쪽만 다시 그린다.
-        self._date_row = ttk.Frame(card)
+        self._date_row = ttk.Frame(body, style='Card.TFrame')
         self._date_row.grid(row=1, column=0, sticky="ew")
 
         this_year = date.today().year
@@ -251,15 +273,15 @@ class InputView(ttk.Frame):
 
         self._period_start_entry = ttk.Entry(self._date_row, width=12)
         self._period_start_entry.insert(0, f"{this_year - 2}-01-01")
-        self._period_tilde_label = ttk.Label(self._date_row, text=" ~ ")
+        self._period_tilde_label = ttk.Label(self._date_row, text=" ~ ", style="Card.TLabel")
         self._period_end_entry = ttk.Entry(self._date_row, width=12)
         self._period_end_entry.insert(0, f"{this_year}-12-31")
 
-        self._reference_date_label = ttk.Label(self._date_row, text="기준일 ")
+        self._reference_date_label = ttk.Label(self._date_row, text="기준일 ", style="Card.TLabel")
         self._all_time_hint_label = ttk.Label(
             self._date_row,
             text="제정부터 현행까지 모두 (날짜 칸 없음)",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         )
         self._find_versions_button = ttk.Button(
             self._date_row, text="개정본 찾기", command=self._refresh_version_list
@@ -307,42 +329,39 @@ class InputView(ttk.Frame):
         self._find_versions_button.pack(side="left", padx=6)
 
     def _build_version_list(self) -> None:
-        frame = ttk.LabelFrame(
-            self._left_column,
-            text="개정본 선택 (오래된 순)",
-            padding=8,
-            style="Card.TLabelframe",
-        )
+        frame = CardPanel(self._left_column, title="개정본 선택 (오래된 순)", padding=8)
         frame.pack(fill="both", expand=True, pady=(0, 8))
+        # CardPanel 은 제목을 바깥에 두므로, 알맹이는 body 에 붙인다.
+        version_body = frame.body
 
         # 개정본이 여덟 개까지 나오는 법령도 있어서 하나씩 끄고 켜기가 번거롭다.
         self._are_all_versions_selected = tk.BooleanVar(value=False)
         self._select_all_checkbox = VCheckbutton(
-            frame,
+            version_body,
             label_text="전체 선택",
             variable=self._are_all_versions_selected,
             command=self._apply_select_all,
         )
         self._select_all_checkbox.pack(anchor="w")
 
-        self._selected_count_label = ttk.Label(frame, text="", style="Hint.TLabel")
+        self._selected_count_label = ttk.Label(version_body, text="", style="Card.Hint.TLabel")
         self._selected_count_label.pack(anchor="w", padx=(20, 0))
 
         # 개정본이 아주 많을 때(주택법 172개 등) 눈에 띄게 알린다.
-        self._many_versions_warning = ttk.Label(frame, text="", style="Danger.TLabel")
+        self._many_versions_warning = ttk.Label(version_body, text="", style="Card.Danger.TLabel")
         self._many_versions_warning.pack(anchor="w", pady=(2, 0))
 
         # 이름이 바뀐 적이 있는 법령·고시라면 알린다.
         # (옛 이름으로 찾은 사용자가 엉뚱한 것을 찾았다고 오해하지 않도록)
         self._name_change_notice = ttk.Label(
-            frame, text="", style="Danger.TLabel", justify="left"
+            frame, text="", style="Card.Danger.TLabel", justify="left"
         )
         self._name_change_notice.pack(anchor="w", pady=(2, 0))
 
-        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=4)
+        ttk.Separator(version_body, orient="horizontal").pack(fill="x", pady=4)
 
         # 목록만 고정 높이 + 스크롤. 172줄이 창을 밀어내지 않게 한다.
-        list_container = ttk.Frame(frame)
+        list_container = ttk.Frame(version_body, style='Card.TFrame')
         list_container.pack(fill="x")
 
         # width=1: 폭은 정해 주지 않으면 기본 약 380px 를 요구해 카드를 밀어낸다.
@@ -362,22 +381,24 @@ class InputView(ttk.Frame):
         self._version_canvas.pack(side="left", fill="both", expand=True)
         self._version_scrollbar.pack(side="right", fill="y")
 
-        self._version_list_frame = ttk.Frame(self._version_canvas)
+        self._version_list_frame = ttk.Frame(self._version_canvas, style="Card.TFrame")
         self._version_list_window = self._version_canvas.create_window(
             (0, 0), window=self._version_list_frame, anchor="nw"
         )
         # 목록을 다시 그릴 때 스크롤 범위 조정이 자기 자신을 또 부르면
         # 창이 멈추므로, 조정 중에는 다시 들어오지 않게 막는다.
         self._is_adjusting_version_scroll = False
+        # 목록 안쪽 폭을 마지막으로 맞춰 둔 값. 10픽셀 간격 비교에 쓴다.
+        self._applied_version_list_width = 0
+        self._pending_version_list_width = 0
+        self._pending_version_width_after_id = None
         self._version_list_frame.bind(
             "<Configure>",
             lambda _event: self._sync_version_list_scrollregion(),
         )
         self._version_canvas.bind(
             "<Configure>",
-            lambda event: self._version_canvas.itemconfigure(
-                self._version_list_window, width=event.width
-            ),
+            self._on_version_canvas_resized,
         )
         # 마우스 휠은 창(app_window) 한곳에서만 받는다.
         # 예전에는 여기 Enter/Leave 로 bind_all / unbind_all 을 썼는데,
@@ -386,10 +407,10 @@ class InputView(ttk.Frame):
         # 언제 굴릴지는 창이 포인터 위치를 보고 정한다.
 
         self._version_hint = ttk.Label(
-            frame,
+            version_body,
             text="법령을 검색하고 시점을 정하면 여기에 개정본이 나열됩니다.\n"
                  "그림으로 만들 개정본을 체크해 주세요.",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         )
         self._version_hint.pack(fill="x")
 
@@ -397,6 +418,30 @@ class InputView(ttk.Frame):
     def version_list_canvas(self) -> tk.Canvas:
         """창 휠 처리기가 '지금 포인터가 목록 위인가' 판별할 때 쓴다."""
         return self._version_canvas
+
+    def _measure_version_list_content_height(self) -> int:
+        """
+        목록 알맹이의 자연 높이를 잰다.
+
+        create_window 에 height 를 강제로 넣어 두면 winfo_reqheight 가
+        그 강제 값을 그대로 돌려줘서, 줄을 다 지워도 '길다'고 나온다.
+        그래서 자식 줄 높이를 더해 잰다.
+        """
+        self._version_canvas.update_idletasks()
+        children = self._version_list_frame.winfo_children()
+        if not children:
+            return 1
+        return max(sum(child.winfo_reqheight() for child in children), 1)
+
+    def can_scroll_version_list(self) -> bool:
+        """
+        개정본 목록을 휠로 굴릴 만큼 내용이 긴가?
+
+        짧으면 창 전체 스크롤로 넘겨야 하므로, 창 휠 처리기가 이걸 본다.
+        """
+        content_height = self._measure_version_list_content_height()
+        canvas_height = max(self._version_canvas.winfo_height(), 1)
+        return content_height > canvas_height + 1
 
     def scroll_version_list_by_wheel(self, delta: int) -> None:
         """개정본 목록만 스크롤한다. (창 휠 처리기가 포인터가 목록 위일 때 부름)"""
@@ -410,6 +455,34 @@ class InputView(ttk.Frame):
         self._version_canvas.yview(*args)
         self._clamp_version_list_to_top()
 
+    def _on_version_canvas_resized(self, event) -> None:
+        """
+        목록 칸 폭이 바뀔 때 안쪽 폭을 맞춘다.
+
+        10픽셀 이상 벌어질 때만 바로 맞추고, 손을 떼면 최종 폭을 한 번 더 맞춘다.
+        매 픽셀마다 맞추면 줄마다 둥근 토글이 다시 늘어나 느리다.
+        """
+        new_width = int(event.width)
+        self._pending_version_list_width = new_width
+        if abs(new_width - self._applied_version_list_width) >= LAYOUT_WIDTH_STEP_PIXELS:
+            self._apply_version_list_width(new_width)
+        if self._pending_version_width_after_id is not None:
+            self.after_cancel(self._pending_version_width_after_id)
+        self._pending_version_width_after_id = self.after(
+            LAYOUT_WIDTH_FINALIZE_DELAY_MS,
+            self._finalize_version_list_width,
+        )
+
+    def _finalize_version_list_width(self) -> None:
+        self._pending_version_width_after_id = None
+        self._apply_version_list_width(self._pending_version_list_width)
+
+    def _apply_version_list_width(self, width: int) -> None:
+        if width == self._applied_version_list_width:
+            return
+        self._applied_version_list_width = width
+        self._version_canvas.itemconfigure(self._version_list_window, width=width)
+
     def _sync_version_list_scrollregion(self) -> None:
         """
         스크롤 범위를 첫 항목이 칸의 맨 위에 오도록 잡는다.
@@ -418,13 +491,17 @@ class InputView(ttk.Frame):
         내용을 칸 맨 아래에 붙인다. 그러면 첫 항목 위에 빈칸이 생긴다.
         그래서 내용이 짧으면 범위를 칸 높이와 같게 해 스크롤이 없게 하고,
         길면 내용 높이만큼만 잡아 첫 항목 위로는 올라가지 않게 한다.
+
+        왜 길 때 yview_moveto(0) 을 안 하는가:
+          휠로 목록을 굴리면 안쪽 틀이 움직이며 Configure 가 다시 뜬다.
+          그때마다 맨 위로 돌리면 휠이 안 먹는 것처럼 보인다. 실제로 그랬다.
+          짧을 때만 맨 위로 맞춰 빈칸이 위에 생기는 일을 막는다.
         """
         if self._is_adjusting_version_scroll:
             return
         self._is_adjusting_version_scroll = True
         try:
-            self._version_canvas.update_idletasks()
-            content_height = max(self._version_list_frame.winfo_reqheight(), 1)
+            content_height = self._measure_version_list_content_height()
             content_width = max(
                 self._version_list_frame.winfo_reqwidth(),
                 self._version_canvas.winfo_width(),
@@ -443,7 +520,8 @@ class InputView(ttk.Frame):
             self._version_canvas.configure(
                 scrollregion=(0, 0, content_width, region_height)
             )
-            self._version_canvas.yview_moveto(0)
+            if content_height <= canvas_height:
+                self._version_canvas.yview_moveto(0)
         finally:
             self._is_adjusting_version_scroll = False
 
@@ -459,12 +537,13 @@ class InputView(ttk.Frame):
         card = StepCard(self._left_column, 3, "조문과 밑줄")
         card.pack(fill="x", pady=(0, 8))
         self._article_card = card
+        body = card.body
 
-        article_row = ttk.Frame(card)
+        article_row = ttk.Frame(body, style='Card.TFrame')
         article_row.grid(row=0, column=0, sticky="ew")
         article_row.grid_columnconfigure(1, weight=1)
         # 두 줄의 이름표 폭을 같게 맞춰, 아래 [밑줄] 입력칸과 왼쪽이 나란히 서게 한다.
-        ttk.Label(article_row, text="조문 번호", width=LABEL_COLUMN_WIDTH).grid(
+        ttk.Label(article_row, text="조문 번호", width=LABEL_COLUMN_WIDTH, style="Card.TLabel").grid(
             row=0, column=0, sticky="w", padx=(0, 8)
         )
         # 안내문은 이름표 칸(첫 열)이 아니라 두 열에 걸쳐 둔다.
@@ -472,9 +551,9 @@ class InputView(ttk.Frame):
         ttk.Label(
             article_row,
             text="예: 1 또는 1, 2 또는 1-3 또는 32의2",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        input_row = ttk.Frame(article_row)
+        input_row = ttk.Frame(article_row, style='Card.TFrame')
         input_row.grid(row=0, column=1, sticky="ew")
         input_row.grid_columnconfigure(0, weight=1)
         # width=1 로 두는 이유: 입력칸이 '최소한 이만큼' 을 요구하지 않고
@@ -489,10 +568,10 @@ class InputView(ttk.Frame):
             row=0, column=2, padx=(6, 0)
         )
 
-        underline_row = ttk.Frame(card)
+        underline_row = ttk.Frame(body, style='Card.TFrame')
         underline_row.grid(row=1, column=0, sticky="ew", pady=(6, 2))
         underline_row.grid_columnconfigure(1, weight=1)
-        ttk.Label(underline_row, text="밑줄", width=LABEL_COLUMN_WIDTH).grid(
+        ttk.Label(underline_row, text="밑줄", width=LABEL_COLUMN_WIDTH, style="Card.TLabel").grid(
             row=0, column=0, sticky="w", padx=(0, 8)
         )
         self._underline_phrase_entry = ttk.Entry(underline_row, width=1)
@@ -512,9 +591,9 @@ class InputView(ttk.Frame):
         ).grid(row=0, column=3, padx=(6, 0))
 
         # 밑줄 색. 기본은 빨강. 작업(담은 목록)마다 이 값이 저장된다.
-        color_row = ttk.Frame(card)
+        color_row = ttk.Frame(body, style='Card.TFrame')
         color_row.grid(row=2, column=0, sticky="w", pady=(2, 2))
-        ttk.Label(color_row, text="밑줄 색", width=LABEL_COLUMN_WIDTH).pack(
+        ttk.Label(color_row, text="밑줄 색", width=LABEL_COLUMN_WIDTH, style="Card.TLabel").pack(
             side="left", padx=(0, 8)
         )
         color_names = [name for name, _rgb in UNDERLINE_COLOR_CHOICES]
@@ -532,18 +611,23 @@ class InputView(ttk.Frame):
         ttk.Label(
             color_row,
             text="(기본 빨강 · 미리보기 형광펜과 PDF 밑줄에 적용)",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         ).pack(side="left", padx=(8, 0))
         # 시작할 때도 미리보기 형광펜을 기본 색에 맞춰 둔다.
         self._apply_preview_highlight_for_current_color()
 
-        chips_frame = ttk.Frame(card)
+        chips_frame = ttk.Frame(body, style='Card.TFrame')
         chips_frame.grid(row=3, column=0, sticky="ew", pady=(4, 2))
         # width=1 로 두는 이유: tk.Canvas 는 폭을 정해 주지 않으면 기본 약 380px 를
         # 요구해서 카드를 그만큼 넓히려 든다. 창이 좁으면 카드 오른쪽이 잘리므로,
         # 요구 폭을 최소로 두고 실제 폭은 남는 자리(fill="x")에 맡긴다.
         self._underline_chips_canvas = tk.Canvas(
-            chips_frame, width=1, height=82, highlightthickness=0
+            chips_frame,
+            width=1,
+            height=82,
+            highlightthickness=0,
+            background=theme.CARD_BACKGROUND,
+            borderwidth=0,
         )
         self._underline_chips_scrollbar = ttk.Scrollbar(
             chips_frame, orient="vertical", command=self._underline_chips_canvas.yview
@@ -551,7 +635,9 @@ class InputView(ttk.Frame):
         self._underline_chips_canvas.configure(yscrollcommand=self._underline_chips_scrollbar.set)
         self._underline_chips_canvas.pack(side="left", fill="x", expand=True)
         self._underline_chips_scrollbar.pack(side="right", fill="y")
-        self._underline_chips_frame = ttk.Frame(self._underline_chips_canvas)
+        self._underline_chips_frame = ttk.Frame(
+            self._underline_chips_canvas, style="Card.TFrame"
+        )
         self._underline_chips_window = self._underline_chips_canvas.create_window(
             (0, 0), window=self._underline_chips_frame, anchor="nw"
         )
@@ -569,17 +655,17 @@ class InputView(ttk.Frame):
         )
 
         ttk.Label(
-            card,
+            body,
             text=(
                 "조문 [미리보기] 또는 [전체보기]에서 문구를 드래그하거나, "
                 "그대로 적어주세요. 전체보기에서 드래그하면 조문 번호도 함께 채워집니다."
             ),
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         ).grid(row=4, column=0, sticky="w", pady=(2, 0))
 
         # 캡션·테두리는 기본으로 켠다. 서면에 넣을 때는 거의 항상 필요하지만,
         # 이미 캡션이 있는 문서에 그림만 끼울 때는 끌 수 있어야 한다.
-        option_row = ttk.Frame(card)
+        option_row = ttk.Frame(body, style='Card.TFrame')
         option_row.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self._should_add_caption = tk.BooleanVar(value=True)
         self._should_add_border = tk.BooleanVar(value=True)
@@ -612,11 +698,12 @@ class InputView(ttk.Frame):
         )
         card.pack(fill="x")
         self._document_card = card
-        card.grid_columnconfigure(1, weight=1)
+        body = card.body
+        body.grid_columnconfigure(1, weight=1)
 
         self._should_use_existing_hwp = tk.BooleanVar(value=False)
         self._use_existing_hwp_checkbutton = ttk.Checkbutton(
-            card,
+            body,
             text="기존 한글 문서에 넣기(체크했을 때만 사용)",
             variable=self._should_use_existing_hwp,
             command=self._on_use_existing_hwp_toggled,
@@ -625,10 +712,10 @@ class InputView(ttk.Frame):
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
 
-        file_row = ttk.Frame(card)
+        file_row = ttk.Frame(body, style='Card.TFrame')
         file_row.grid(row=1, column=0, columnspan=2, sticky="ew")
         file_row.grid_columnconfigure(1, weight=1)
-        ttk.Label(file_row, text="대상 한글 파일").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(file_row, text="대상 한글 파일", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self._hwp_path_entry = HintEntry(file_row, "비워두면 새 문서를 만듭니다")
         self._hwp_path_entry.grid(row=0, column=1, sticky="ew")
         self._browse_hwp_button = ttk.Button(file_row, text="찾아보기", command=self._browse_hwp_file)
@@ -640,9 +727,9 @@ class InputView(ttk.Frame):
         )
         self._open_hwp_folder_button.grid(row=0, column=3, padx=(6, 0))
 
-        mode_row = ttk.Frame(card)
+        mode_row = ttk.Frame(body, style='Card.TFrame')
         mode_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
-        ttk.Label(mode_row, text="삽입 위치").pack(side="left", padx=(0, 8))
+        ttk.Label(mode_row, text="삽입 위치", style="Card.TLabel").pack(side="left", padx=(0, 8))
         self._insertion_mode = tk.StringVar(value=InsertionMode.APPEND_TO_END.value)
         for mode in InsertionMode:
             ttk.Radiobutton(
@@ -650,25 +737,33 @@ class InputView(ttk.Frame):
             ).pack(side="left", padx=(0, 12))
 
         ttk.Label(
-            card,
+            body,
             text="이 단계는 현재 사용하지 않습니다. 기본 저장 규칙으로 자동 저장됩니다.",
-            style="Hint.TLabel",
+            style="Card.Hint.TLabel",
         ).grid(row=3, column=0, columnspan=2, sticky="w")
         self._disable_hwp_save_section()
 
     def _build_job_list(self) -> None:
-        frame = ttk.LabelFrame(
-            self._left_column,
-            text="4. 담은 작업 대기 목록",
-            padding=8,
-            style="Card.TLabelframe",
-        )
+        frame = CardPanel(self._left_column, title="4. 담은 작업 대기 목록", padding=8)
         frame.pack(fill="both", expand=False)
         self._job_list_frame = frame
+        job_body = frame.body
 
-        self._job_listbox = tk.Listbox(frame, height=6, selectmode="extended")
+        self._job_listbox = tk.Listbox(
+            job_body,
+            height=6,
+            selectmode="extended",
+            font=theme.body_font(10),
+            background=theme.CARD_BACKGROUND,
+            foreground=theme.TEXT_PRIMARY,
+            selectbackground=theme.LINK_BLUE,
+            selectforeground="#ffffff",
+            borderwidth=1,
+            highlightthickness=0,
+            relief="solid",
+        )
         self._job_listbox.pack(side="left", fill="both", expand=True)
-        control_column = ttk.Frame(frame)
+        control_column = ttk.Frame(job_body, style='Card.TFrame')
         control_column.pack(side="left", padx=6, anchor="n")
         self._remove_selected_job_button = ttk.Button(
             control_column,
@@ -691,7 +786,7 @@ class InputView(ttk.Frame):
             fill="x", pady=(6, 0)
         )
 
-        self._figure_count_label = ttk.Label(frame, text="", style="Hint.TLabel")
+        self._figure_count_label = ttk.Label(job_body, text="", style="Card.Hint.TLabel")
         self._figure_count_label.pack(fill="x")
         self._refresh_action_button_states()
 
@@ -1353,17 +1448,18 @@ class InputView(ttk.Frame):
             ttk.Label(
                 self._underline_chips_frame,
                 text="아직 추가된 문구가 없습니다.",
-                style="Hint.TLabel",
+                style="Card.Hint.TLabel",
             ).pack(anchor="w")
             return
 
         for index, phrase in enumerate(self._underline_phrases):
-            chip_row = ttk.Frame(self._underline_chips_frame)
+            chip_row = ttk.Frame(self._underline_chips_frame, style="Card.TFrame")
             chip_row.pack(fill="x", pady=(0, 4))
             ttk.Label(
                 chip_row,
                 text=f"• {phrase}",
                 wraplength=420,
+                style="Card.TLabel",
             ).pack(side="left", fill="x", expand=True)
             ttk.Button(
                 chip_row,
@@ -1435,7 +1531,8 @@ class InputView(ttk.Frame):
         self._hwp_path_entry.configure(state="disabled")
         self._browse_hwp_button.configure(state="disabled")
         self._open_hwp_folder_button.configure(state="disabled")
-        for child in self._document_card.winfo_children():
+        # StepCard 는 제목줄+body 구조라, 라디오 단추는 body 안에 있다.
+        for child in self._document_card.body.winfo_children():
             if isinstance(child, ttk.Frame):
                 for nested in child.winfo_children():
                     if isinstance(nested, ttk.Radiobutton):

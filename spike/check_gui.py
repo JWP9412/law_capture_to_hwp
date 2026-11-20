@@ -793,16 +793,54 @@ all_passed &= report(
     f"{before_main} -> {after_main}",
 )
 
-# 개정본 목록 위 휠 → 창은 그대로, 목록만 굴러야 한다
+# 목록이 짧을 때: 개정본 칸 위 휠 → 창이 움직여야 한다
+for child in list(view._version_list_frame.winfo_children()):
+    child.destroy()
+view._sync_version_list_scrollregion()
+window.update()
 window._scroll_canvas.yview_moveto(0)
 window.update()
-main_before_list = window._scroll_canvas.yview()
+main_before_short = window._scroll_canvas.yview()
 version_canvas = view.version_list_canvas
 window._on_mousewheel(_FakeWheel(-120, version_canvas))
 window.update()
 all_passed &= report(
-    "개정본 목록 위 휠은 창을 안 움직이는가",
-    window._scroll_canvas.yview() == main_before_list,
+    "개정본 목록이 짧을 때 칸 위 휠은 창을 움직이는가",
+    window._scroll_canvas.yview() != main_before_short,
+    f"{main_before_short} -> {window._scroll_canvas.yview()}",
+)
+
+# 목록이 길 때: 목록만 내려가고 창은 그대로. sync 후에도 맨 위로 튕기지 않는다.
+from ui.widgets import VCheckbutton
+
+for index in range(30):
+    VCheckbutton(
+        view._version_list_frame,
+        label_text=f"검증용 개정본 {index}",
+        variable=tk.BooleanVar(value=False),
+    ).pack(fill="x", anchor="w")
+view._sync_version_list_scrollregion()
+window.update()
+window._scroll_canvas.yview_moveto(0)
+version_canvas.yview_moveto(0)
+window.update()
+main_before_long = window._scroll_canvas.yview()
+list_before_long = version_canvas.yview()
+window._on_mousewheel(_FakeWheel(-120, version_canvas))
+window.update()
+list_after_wheel = version_canvas.yview()
+all_passed &= report(
+    "개정본 목록이 길 때 칸 위 휠은 목록만 움직이는가",
+    list_after_wheel != list_before_long
+    and window._scroll_canvas.yview() == main_before_long,
+    f"list {list_before_long} -> {list_after_wheel}",
+)
+view._sync_version_list_scrollregion()
+window.update()
+all_passed &= report(
+    "목록 sync 후에도 스크롤 위치가 유지되는가",
+    version_canvas.yview() == list_after_wheel,
+    f"{list_after_wheel} -> {version_canvas.yview()}",
 )
 version_canvas.yview_moveto(0)
 window.update()
@@ -813,6 +851,23 @@ all_passed &= report(
     "개정본 목록은 맨 위 항목보다 위로 안 올라가는가",
     top_fraction >= 0,
     str(top_fraction),
+)
+
+# 폭 간격: 5px 은 안 맞추고, 12px 은 맞춘다
+applied_before = window._applied_container_width
+window._on_canvas_resized(type("E", (), {"width": applied_before + 5})())
+window.update()
+all_passed &= report(
+    "폭이 5px만 바뀌면 안쪽을 안 맞추는가",
+    window._applied_container_width == applied_before,
+    f"{applied_before} -> {window._applied_container_width}",
+)
+window._on_canvas_resized(type("E", (), {"width": applied_before + 12})())
+window.update()
+all_passed &= report(
+    "폭이 12px 바뀌면 안쪽을 맞추는가",
+    window._applied_container_width == applied_before + 12,
+    f"{applied_before} -> {window._applied_container_width}",
 )
 
 # 예전 버그: 목록 Leave 때 unbind_all 하면 창 휠이 죽었다.

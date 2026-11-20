@@ -93,9 +93,15 @@ window.update()
 all_passed &= report("개정본을 찾았는가", len(view._version_checkboxes) >= 1,
                      str(view._version_checkboxes[0][1]) if view._version_checkboxes else "없음")
 
+# 개정본 목록은 처음엔 전부 꺼져 있다. 담으려면 필요한 판을 직접 켠다.
+if view._version_checkboxes:
+    view._version_checkboxes[0][0].set(True)
+    window.update()
+
 set_entry(view._article_entry, ARTICLE_NUMBER)
-set_entry(view._underline_entry, UNDERLINE_PHRASE)
-set_entry(view._hwp_path_entry, "")
+# 밑줄은 입력칸이 아니라 칩 목록에 들어가야 담기에 반영된다.
+view.add_underline_phrase(UNDERLINE_PHRASE)
+window.update()
 view._add_job()
 window.update()
 all_passed &= report("조건을 목록에 담았는가", len(view._jobs) == 1)

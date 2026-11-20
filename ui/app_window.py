@@ -26,14 +26,23 @@ from ui.input_view import InputView
 from ui.progress_view import ProgressView
 from ui.result_view import ResultView
 from ui.taskbar_identity import apply_taskbar_identity
+from ui import theme
 from ui.theme import apply_theme
 
 WINDOW_TITLE = "법령 조문 캡처"
-WINDOW_SIZE = "1180x780"
+WINDOW_SIZE = "1180x820"
+HEADER_HEIGHT = 64
 
 # 작업 진행 소식을 확인하는 간격(밀리초). 너무 짧으면 창이 버벅이고,
 # 너무 길면 진행 상황이 늦게 보인다.
 MESSAGE_CHECK_INTERVAL = 200
+
+# 창 폭이 이만큼(픽셀) 이상 벌어질 때만 안쪽 화면 폭을 다시 맞춘다.
+# 1픽셀마다 맞추면 둥근 버튼·입력칸이 매번 다시 늘어나 버벅인다.
+LAYOUT_WIDTH_STEP_PIXELS = 10
+
+# 손을 떼면 최종 폭을 한 번 더 맞추기까지의 대기(밀리초).
+LAYOUT_WIDTH_FINALIZE_DELAY_MS = 100
 
 DEFAULT_RESULT_FILE_NAME = "법령캡처_결과.hwp"
 
@@ -51,6 +60,10 @@ class AppWindow(tk.Tk):
 
         self._controller = LawCaptureController()
 
+        # 머리 띠는 입력·진행·완료 세 화면 공통으로 맨 위에 둔다.
+        # 화면을 바꿔 끼우는 스크롤 틀 '바깥' 이어야 스크롤해도 안 사라진다.
+        self._build_header_band()
+
         # Canvas + Scrollbar 로 감싸 창이 작아도 내용을 모두 볼 수 있게 한다.
         # 개정본 목록(input_view)에 이미 써 본 패턴을 창 전체에 그대로 쓴다.
         # 화면 맨 아래에 항상 떠 있는 자리. 스크롤 영역 '바깥' 이다.
@@ -61,7 +74,11 @@ class AppWindow(tk.Tk):
         self._footer = ttk.Frame(self)
         self._footer.pack(side="bottom", fill="x")
 
-        self._scroll_canvas = tk.Canvas(self, highlightthickness=0)
+        self._scroll_canvas = tk.Canvas(
+            self,
+            highlightthickness=0,
+            background=theme.WINDOW_BACKGROUND,
+        )
         self._scrollbar = ttk.Scrollbar(
             self, orient="vertical", command=self._scroll_canvas.yview
         )
@@ -76,6 +93,10 @@ class AppWindow(tk.Tk):
 
         self._container.bind("<Configure>", self._on_container_resized)
         self._scroll_canvas.bind("<Configure>", self._on_canvas_resized)
+        # 안쪽 화면 폭을 마지막으로 맞춰 둔 값. 10픽셀 간격 비교에 쓴다.
+        self._applied_container_width = 0
+        self._pending_container_width = 0
+        self._pending_width_after_id = None
         # 휠은 창에서만 bind_all 한다. 하위 화면이 unbind_all 하면
         # 이 연결까지 지워져 휠이 먹통이 되므로, 하위는 절대 unbind_all 하지 않는다.
         self._scroll_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -92,6 +113,70 @@ class AppWindow(tk.Tk):
         # 창이 다 만들어진 뒤에 적어야 한다. (창 번호가 필요하므로)
         # 이것이 있어야 창을 우클릭해 고정해도 아이콘·실행이 제대로 된다.
         apply_taskbar_identity(self)
+
+    def _build_header_band(self) -> None:
+        """
+        창 맨 위 흰 머리 띠.
+
+        국가법령정보센터 머리 영역(흰 바탕 + 두 줄 제목)을 따왔다.
+        정부 상징(태극 로고)은 사용 규정이 있어 넣지 않았다.
+        왼쪽은 프로그램 이름, 오른쪽은 자료 출처와 버전을 보여
+        '법령 관련 프로그램' 임을 한눈에 알리려는 것이다.
+        """
+        header = tk.Frame(
+            self,
+            background=theme.CARD_BACKGROUND,
+            height=HEADER_HEIGHT,
+            highlightthickness=0,
+        )
+        header.pack(side="top", fill="x")
+        header.pack_propagate(False)
+
+        inner = ttk.Frame(header, style="Card.TFrame", padding=(16, 0))
+        inner.pack(fill="both", expand=True)
+
+        # 진남 세로 막대 — 사이트 로고 자리 대신 쓰는 포인트 색.
+        accent = tk.Frame(inner, background=theme.ACCENT_BLUE, width=4, height=34)
+        accent.pack(side="left", padx=(0, 12))
+        accent.pack_propagate(False)
+
+        brand = ttk.Frame(inner, style="Card.TFrame")
+        brand.pack(side="left")
+        ttk.Label(
+            brand,
+            text="건설 하자소송 준비서면용",
+            style="Header.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            brand,
+            text=WINDOW_TITLE,
+            style="HeaderTitle.TLabel",
+        ).pack(anchor="w")
+
+        meta = ttk.Frame(inner, style="Card.TFrame")
+        meta.pack(side="right")
+        source_row = ttk.Frame(meta, style="Card.TFrame")
+        source_row.pack(anchor="e")
+        ttk.Label(
+            source_row,
+            text="자료 출처: ",
+            style="Header.TLabel",
+        ).pack(side="left")
+        ttk.Label(
+            source_row,
+            text="국가법령정보센터",
+            style="HeaderLink.TLabel",
+        ).pack(side="left")
+        ttk.Label(
+            meta,
+            text=f"버전 {config.APP_VERSION}",
+            style="Header.TLabel",
+        ).pack(anchor="e")
+
+        # 머리 띠와 본문을 가르는 가는 선 (사이트 머리 아래 구분선).
+        tk.Frame(self, background=theme.CARD_BORDER, height=1).pack(
+            side="top", fill="x"
+        )
 
     def _apply_window_icon(self) -> None:
         """
@@ -118,26 +203,57 @@ class AppWindow(tk.Tk):
         self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
 
     def _on_canvas_resized(self, event) -> None:
-        """창 폭에 맞춰 안쪽 화면 폭을 맞춘다. (가로 스크롤은 만들지 않는다)"""
-        self._scroll_canvas.itemconfigure(self._container_window, width=event.width)
+        """
+        창 폭에 맞춰 안쪽 화면 폭을 맞춘다. (가로 스크롤은 만들지 않는다)
+
+        10픽셀 이상 벌어질 때만 바로 맞추고, 손을 떼면 최종 폭을 한 번 더 맞춘다.
+        매 픽셀마다 맞추면 둥근 버튼·입력칸이 전부 다시 늘어나 느리다.
+        """
+        new_width = int(event.width)
+        self._pending_container_width = new_width
+        if abs(new_width - self._applied_container_width) >= LAYOUT_WIDTH_STEP_PIXELS:
+            self._apply_container_width(new_width)
+        if self._pending_width_after_id is not None:
+            self.after_cancel(self._pending_width_after_id)
+        self._pending_width_after_id = self.after(
+            LAYOUT_WIDTH_FINALIZE_DELAY_MS,
+            self._finalize_container_width,
+        )
+
+    def _finalize_container_width(self) -> None:
+        self._pending_width_after_id = None
+        self._apply_container_width(self._pending_container_width)
+
+    def _apply_container_width(self, width: int) -> None:
+        if width == self._applied_container_width:
+            return
+        self._applied_container_width = width
+        self._scroll_canvas.itemconfigure(self._container_window, width=width)
 
     def _on_mousewheel(self, event) -> None:
         """
         마우스 휠을 포인터 아래 칸에 맞게 굴린다.
 
-        - 개정본 목록 위 → 목록만
+        - 개정본 목록 위 + 목록이 김 → 목록만
+        - 개정본 목록 위 + 목록이 짧음 → 창 전체 (스크롤할 게 없으므로)
         - 미리보기 본문 위 → 본문만 (조문 읽다가 창 전체가 움직이지 않게)
         - 그 밖 → 창 전체
+
+        포인터 위치를 먼저 보는 이유:
+          휠은 포커스가 아닌 '마우스 아래' 기준이어야 한다.
+          event.widget 만 보면 다른 칸에 포커스가 있을 때 엉뚱한 곳으로 간다.
         """
         under_pointer = self.winfo_containing(event.x_root, event.y_root)
-        target_widget = getattr(event, "widget", None) or under_pointer
+        target_widget = under_pointer or getattr(event, "widget", None)
         if target_widget is None:
             self._scroll_canvas.yview_scroll(int(-event.delta / 120), "units")
             return
 
         if _is_under(target_widget, self._input_view.version_list_canvas):
-            self._input_view.scroll_version_list_by_wheel(event.delta)
-            return
+            if self._input_view.can_scroll_version_list():
+                self._input_view.scroll_version_list_by_wheel(event.delta)
+                return
+            # 목록이 짧으면 아래 창 전체 스크롤로 넘어간다.
 
         if _is_under(target_widget, self._input_view.preview_view.text_box):
             self._input_view.preview_view.scroll_text_by_wheel(event.delta)

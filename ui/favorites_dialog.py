@@ -80,7 +80,14 @@ class FavoritesSettingsDialog(tk.Toplevel):
             width=48,
             activestyle="dotbox",
             exportselection=False,
-            font=("맑은 고딕", 10),
+            font=theme.body_font(10),
+            background=theme.CARD_BACKGROUND,
+            foreground=theme.TEXT_PRIMARY,
+            selectbackground=theme.LINK_BLUE,
+            selectforeground="#ffffff",
+            borderwidth=1,
+            highlightthickness=0,
+            relief="solid",
         )
         scrollbar = ttk.Scrollbar(list_frame, command=self._listbox.yview)
         self._listbox.configure(yscrollcommand=scrollbar.set)

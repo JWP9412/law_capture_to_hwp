@@ -70,7 +70,14 @@ class CaptureSetMemoryDialog(tk.Toplevel):
             width=28,
             activestyle="dotbox",
             exportselection=False,
-            font=("맑은 고딕", 10),
+            font=theme.body_font(10),
+            background=theme.CARD_BACKGROUND,
+            foreground=theme.TEXT_PRIMARY,
+            selectbackground=theme.LINK_BLUE,
+            selectforeground="#ffffff",
+            borderwidth=1,
+            highlightthickness=0,
+            relief="solid",
         )
         self._set_listbox.pack(fill="both", expand=True)
         self._set_listbox.bind("<<ListboxSelect>>", lambda _event: self._show_selected_set_items())
@@ -96,7 +103,14 @@ class CaptureSetMemoryDialog(tk.Toplevel):
             width=52,
             activestyle="dotbox",
             exportselection=False,
-            font=("맑은 고딕", 10),
+            font=theme.body_font(10),
+            background=theme.CARD_BACKGROUND,
+            foreground=theme.TEXT_PRIMARY,
+            selectbackground=theme.LINK_BLUE,
+            selectforeground="#ffffff",
+            borderwidth=1,
+            highlightthickness=0,
+            relief="solid",
         )
         self._item_listbox.grid(row=0, column=0, columnspan=2, sticky="nsew")
         self._item_listbox.bind("<<ListboxSelect>>", lambda _event: self._fill_edit_fields())

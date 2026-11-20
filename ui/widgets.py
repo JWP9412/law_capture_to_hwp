@@ -4,14 +4,28 @@
 import tkinter as tk
 from tkinter import ttk
 
+from PIL import Image, ImageDraw, ImageTk
+
 from ui import theme
 
 
-AUTO_WRAP_LABEL_STYLES = ("Hint.TLabel", "Danger.TLabel")
+AUTO_WRAP_LABEL_STYLES = (
+    "Hint.TLabel",
+    "Danger.TLabel",
+    "Card.Hint.TLabel",
+    "Card.Danger.TLabel",
+)
 
 # 카드 오른쪽 가장자리에서 글자를 띄워 둘 여유(테두리·안쪽 여백·스크롤바 몫)
 AUTO_WRAP_RIGHT_MARGIN = 34
 AUTO_WRAP_MINIMUM_WIDTH = 120
+
+# 카드 배경 그림을 다시 그릴 때, 너무 자주 그리지 않기 위한 최소 변화(픽셀).
+# 창 폭 10픽셀 간격 정책과 맞춰, 그보다 작은 흔들림에는 다시 그리지 않는다.
+_CARD_REDRAW_SIZE_SLOP = 10
+
+# 크기 조절 중에는 그리지 않고, 손이 멈춘 뒤에 한 번만 그리기 위한 대기(ms).
+_CARD_REDRAW_DELAY_MS = 80
 
 
 def _iter_descendants(widget):
@@ -20,7 +34,7 @@ def _iter_descendants(widget):
         yield from _iter_descendants(child)
 
 
-def install_auto_wrap(card: ttk.LabelFrame) -> None:
+def install_auto_wrap(card) -> None:
     """
     카드 안의 안내문이 카드 폭을 넘지 않고 알아서 줄바꿈되게 한다.
 
@@ -52,33 +66,176 @@ def install_auto_wrap(card: ttk.LabelFrame) -> None:
     card.after_idle(rewrap)
 
 
-class StepCard(ttk.LabelFrame):
+class RoundedCardShell(tk.Frame):
     """
-    번호가 붙은 카드 컨테이너.
+    둥근 모서리 카드의 겉면.
 
-    입력칸 배치를 grid 기반으로 통일해, 라벨 폭을 숫자로 맞추지 않아도
-    줄 정렬이 안정적으로 유지되게 한다.
+    왜 ttk 그림 요소를 쓰지 않나:
+      큰 카드에 ttk image border 를 붙이면 스크롤 화면에서
+      창 그리기(update)가 끝나지 않는 경우가 있다.
+      그래서 카드 크기만큼 둥근 사각형 그림을 직접 그려
+      배경 라벨에 깔고, 그 위에 알맹이 틀을 올린다.
+
+    구조:
+      이 Frame(창 바탕색) → 배경 라벨(둥근 흰 카드 그림) → panel(알맹이)
+    """
+
+    def __init__(self, parent, padding: int = 12):
+        super().__init__(parent, background=theme.WINDOW_BACKGROUND, highlightthickness=0)
+        self._padding = padding
+        self._photo = None
+        self._drawn_size = (0, 0)
+        self._redraw_after_id = None
+
+        self._background_label = tk.Label(self, borderwidth=0, highlightthickness=0)
+        self._background_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # 알맹이 패널. 배경 그림 위에 올린다.
+        self.panel = ttk.Frame(self, style="Card.TFrame")
+        self.panel.pack(
+            fill="both",
+            expand=True,
+            padx=1,
+            pady=1,
+            ipadx=max(padding - 1, 0),
+            ipady=max(padding - 1, 0),
+        )
+
+        self.bind("<Configure>", self._schedule_redraw, add="+")
+
+    def _schedule_redraw(self, event=None) -> None:
+        if event is not None and event.widget is not self:
+            return
+        if self._redraw_after_id is not None:
+            self.after_cancel(self._redraw_after_id)
+        # 크기 조절 중 매번 그리지 않고, 잠깐 기다렸다가 한 번만 그린다.
+        self._redraw_after_id = self.after(_CARD_REDRAW_DELAY_MS, self._redraw_background)
+
+    def _redraw_background(self) -> None:
+        self._redraw_after_id = None
+        width = max(self.winfo_width(), 1)
+        height = max(self.winfo_height(), 1)
+        old_width, old_height = self._drawn_size
+        if (
+            abs(width - old_width) < _CARD_REDRAW_SIZE_SLOP
+            and abs(height - old_height) < _CARD_REDRAW_SIZE_SLOP
+        ):
+            return
+        if width < 8 or height < 8:
+            return
+
+        radius = theme.CARD_CORNER_RADIUS
+        scale = 2
+        # tk.Label 은 투명(알파)을 제대로 못 보여 모서리가 검게 나온다.
+        # 그래서 모서리 밖을 창 바탕색으로 칠한 RGB 그림으로 만든다.
+        image = Image.new(
+            "RGB",
+            (width * scale, height * scale),
+            theme.WINDOW_BACKGROUND,
+        )
+        drawer = ImageDraw.Draw(image)
+        drawer.rounded_rectangle(
+            (0, 0, width * scale - 1, height * scale - 1),
+            radius=radius * scale,
+            fill=theme.CARD_BORDER,
+        )
+        inset = scale
+        drawer.rounded_rectangle(
+            (inset, inset, width * scale - 1 - inset, height * scale - 1 - inset),
+            radius=max(radius * scale - inset, 0),
+            fill=theme.CARD_BACKGROUND,
+        )
+        small = image.resize((width, height), Image.Resampling.LANCZOS)
+        self._photo = ImageTk.PhotoImage(small)
+        self._background_label.configure(image=self._photo)
+        self._drawn_size = (width, height)
+
+
+class StepCard(RoundedCardShell):
+    """
+    번호가 붙은 둥근 카드 컨테이너.
+
+    제목 줄은 pack, 내용은 grid — 혼용하면 안 되므로 내용용 body 를 둔다.
     """
 
     def __init__(self, parent, step_number: int, title: str):
-        super().__init__(
-            parent,
-            text=f"{step_number}. {title}",
-            padding=10,
-            style="Card.TLabelframe",
+        super().__init__(parent, padding=12)
+        self._title_text = f"{step_number}. {title}"
+
+        title_bar = ttk.Frame(self.panel, style="Card.TFrame")
+        title_bar.pack(fill="x", pady=(0, 8))
+        badge = ttk.Label(
+            title_bar,
+            text=str(step_number),
+            style="StepBadge.TLabel",
+            width=2,
+            anchor="center",
         )
-        self.grid_columnconfigure(1, weight=1)
+        badge.pack(side="left", padx=(0, 6))
+        ttk.Label(
+            title_bar,
+            text=title,
+            style="CardTitle.TLabel",
+        ).pack(side="left")
+
+        self.body = ttk.Frame(self.panel, style="Card.TFrame")
+        self.body.pack(fill="both", expand=True)
+        self.body.grid_columnconfigure(1, weight=1)
+
+    def cget(self, key):
+        """예전 LabelFrame 검증 코드가 text 를 읽어도 되게 한다."""
+        if key == "text":
+            return self._title_text
+        return super().cget(key)
+
+    def grid_columnconfigure(self, index, **kwargs):
+        """내용 틀에 열 비율을 넘긴다. (예전 LabelFrame API 와 같게)"""
+        return self.body.grid_columnconfigure(index, **kwargs)
+
+    def grid_rowconfigure(self, index, **kwargs):
+        return self.body.grid_rowconfigure(index, **kwargs)
+
+
+class CardPanel(RoundedCardShell):
+    """
+    번호 없이 제목만 있는 둥근 카드.
+
+    개정본 선택·담은 작업 목록·조문 미리보기처럼
+    'N. 제목' 번호가 없는 칸에 쓴다.
+    """
+
+    def __init__(self, parent, title: str = "", padding: int = 10):
+        super().__init__(parent, padding=padding)
+        self._title_text = title
+        if title:
+            ttk.Label(self.panel, text=title, style="CardTitle.TLabel").pack(
+                anchor="w", pady=(0, 6)
+            )
+        self.body = ttk.Frame(self.panel, style="Card.TFrame")
+        self.body.pack(fill="both", expand=True)
+
+    def cget(self, key):
+        """
+        예전 LabelFrame 검증 코드가 text 를 읽어도 되게 한다.
+        (spike/check_gui.py 가 _job_list_frame.cget("text") 를 쓴다)
+        """
+        if key == "text":
+            return self._title_text
+        return super().cget(key)
+
+    def grid_columnconfigure(self, index, **kwargs):
+        return self.body.grid_columnconfigure(index, **kwargs)
 
 
 def add_field(card: ttk.Frame, row_index: int, label_text: str, widget, hint_text: str = "") -> None:
     """
     카드 안에 '라벨 + 입력칸' 한 줄을 만든다.
     """
-    label = ttk.Label(card, text=label_text)
+    label = ttk.Label(card, text=label_text, style="Card.TLabel")
     label.grid(row=row_index, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
     widget.grid(row=row_index, column=1, sticky="ew", pady=(0, 6))
     if hint_text:
-        hint = ttk.Label(card, text=hint_text, style="Hint.TLabel")
+        hint = ttk.Label(card, text=hint_text, style="Card.Hint.TLabel")
         hint.grid(row=row_index + 1, column=1, sticky="w", pady=(0, 6))
 
 
@@ -148,12 +305,15 @@ class HintEntry(ttk.Entry):
         self._is_showing_hint = False
 
 
-class VCheckbutton(tk.Checkbutton):
+class VCheckbutton(ttk.Checkbutton):
     """
     체크 상태를 'v'로 보여주는 공통 체크박스.
 
-    기본 ttk 체크박스는 환경에 따라 x처럼 보여 혼동을 줄 수 있어,
-    선택됨/해제됨을 텍스트로 분명히 표시한다.
+    예전에는 tk.Checkbutton(indicatoron=False) 을 썼는데,
+    tk 위젯은 둥근 모서리 그림을 입힐 수 없다.
+    그래서 ttk.Checkbutton + Toggle.TCheckbutton(둥근 그림) 으로 바꿨다.
+
+    바깥에서 쓰는 방법(label_text, variable, command)은 그대로다.
     """
 
     def __init__(
@@ -167,23 +327,18 @@ class VCheckbutton(tk.Checkbutton):
         self._label_text = label_text
         self._variable = variable
         self._text_variable = tk.StringVar()
+        self._external_command = command
+        # ttk.Checkbutton 은 anchor 를 생성 인자로 안 받는 환경이 있어 걸러 낸다.
+        kwargs.pop("anchor", None)
         super().__init__(
             parent,
             textvariable=self._text_variable,
             variable=self._variable,
             command=self._on_click,
-            indicatoron=False,
-            relief="groove",
-            padx=8,
-            pady=2,
-            bg=theme.CARD_BACKGROUND,
-            activebackground=theme.CARD_BACKGROUND,
-            fg=theme.TEXT_PRIMARY,
-            activeforeground=theme.TEXT_PRIMARY,
-            bd=1,
+            style="Toggle.TCheckbutton",
+            takefocus=False,
             **kwargs,
         )
-        self._external_command = command
         self._variable.trace_add("write", self._on_variable_changed)
         self._refresh_label()
 

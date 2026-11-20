@@ -14,7 +14,7 @@ from pathlib import Path
 # 프로그램 버전
 # ---------------------------------------------------------------------------
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "3.0.0"
 
 # ---------------------------------------------------------------------------
 # 폴더 위치
@@ -55,6 +55,12 @@ class LawSourceKind(Enum):
 
 # 갈래별로 다른 부분만 모아둔 표.
 # 저장 버튼(#aBtnOutPutSave)처럼 양쪽이 똑같은 것은 아래 공통 항목에 둔다.
+#
+# 2026-11 리뉴얼로 저장 창 구조가 바뀌었다.
+#   - 저장 버튼이 안쪽 칸(#…OutPutLayer) 밖, 바깥 팝업(#…OutPutDivWrite)의
+#     아래 단추 줄(div.btnBottom)로 옮겨졌다. 그래서 팝업·안쪽 칸을 따로 둔다.
+#   - 고시 PDF 단추 이름이 #FileSavePdf → #FileSavePdf1 로 바뀌어
+#     법령과 같아졌다. 예전 이름을 쓰면 PDF 대신 HWP 가 받아지거나 멈춘다.
 LAW_SITE_ADAPTERS = {
     LawSourceKind.ADMINISTRATIVE_RULE: {
         "detail_page_path": "/LSW/admRulLsInfoP.do",
@@ -62,8 +68,11 @@ LAW_SITE_ADAPTERS = {
         "history_path": "/LSW/admRulHstListR.do",
         # 이력을 물어볼 때 문서 번호만 있으면 된다.
         "law_id_parameter": None,
+        # 바깥 팝업(저장·취소 단추, 파일 형식 라디오가 여기 있다)
+        "save_popup_selector": "#admRulOutPutDivWrite",
+        # 안쪽 칸(조문 목록 joNo 가 여기 있다)
         "save_dialog_selector": "#admRulOutPutLayer",
-        "pdf_radio_selector": "#FileSavePdf",
+        "pdf_radio_selector": "#FileSavePdf1",
         # 저장 창 목록에서 제1조를 가리키는 값: "0001-0000:00"
         "save_dialog_article_value_format": "{article_number:04d}-0000:{branch_number:02d}",
     },
@@ -73,6 +82,7 @@ LAW_SITE_ADAPTERS = {
         "history_path": "/LSW/lsHstListR.do",
         # 법령은 문서 번호와 법령 고유번호를 함께 줘야 이력을 알려준다.
         "law_id_parameter": "lsId",
+        "save_popup_selector": "#lsOutPutDivWrite",
         "save_dialog_selector": "#lsOutPutLayer",
         "pdf_radio_selector": "#FileSavePdf1",
         # 저장 창 목록에서 제1조를 가리키는 값: "0001:00" (고시와 형식이 다르다)
@@ -85,11 +95,12 @@ ARTICLE_CHECKBOX_GROUP_SELECTOR = "input[name=joNoList]"  # 본문 옆의 조문
 OPEN_SAVE_DIALOG_SCRIPT = "bdyCheckOutPut('0')"
 ARTICLE_RANGE_INPUT_SELECTOR = "#outputCustomJoNo"
 
-# 저장 창 안의 '저장' 버튼.
+# 저장 창의 '저장' 버튼.
 #
-# 반드시 저장 창 안쪽으로 범위를 좁혀서 찾아야 한다.
+# 반드시 바깥 팝업(save_popup_selector) 안쪽으로 범위를 좁혀서 찾아야 한다.
 # 법령 화면에는 같은 이름의 버튼이 하나 더 있는데(숨어 있는 '3단비교' 창의 것),
 # 범위를 좁히지 않으면 그 숨은 버튼을 누르려다 실패한다.
+# 2026-11 리뉴얼 이후에는 안쪽 칸(#…OutPutLayer)에는 이 버튼이 없다.
 SAVE_BUTTON_SELECTOR = "#aBtnOutPutSave"
 SAVE_DIALOG_ARTICLE_CHECKBOX_NAME = "joNo"
 

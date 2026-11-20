@@ -191,16 +191,23 @@ class LawSiteBrowser:
         저장 창은 두 부분이 따로 그려진다. 파일 형식 고르는 부분이 먼저 나오고,
         어느 조문을 저장할지 고르는 목록이 조금 늦게 채워진다.
         목록이 준비되기 전에 손대면 아무것도 못 찾으므로 둘 다 기다린다.
+
+        PDF 단추는 바깥 팝업 안쪽으로 범위를 좁혀 찾는다.
+        법령 화면에는 저장 창 밖에도 같은 이름(#FileSavePdf1)의 단추가
+        따로 있어서(전체저장 등), 범위를 안 좁히면 엉뚱한 단추를 기다릴 수 있다.
         """
         adapter = config.LAW_SITE_ADAPTERS[version.source_kind]
         self._page.evaluate(config.OPEN_SAVE_DIALOG_SCRIPT)
 
+        pdf_radio_selector = (
+            f"{adapter['save_popup_selector']} {adapter['pdf_radio_selector']}"
+        )
         article_list_selector = (
             f"{adapter['save_dialog_selector']} "
             f"input[name={config.SAVE_DIALOG_ARTICLE_CHECKBOX_NAME}]"
         )
         for selector, description in (
-            (adapter["pdf_radio_selector"], "저장 창의 파일 형식 선택"),
+            (pdf_radio_selector, "저장 창의 파일 형식 선택"),
             (article_list_selector, "저장 창의 조문 목록"),
         ):
             try:
@@ -220,6 +227,10 @@ class LawSiteBrowser:
 
         이 단계가 없으면 조문 하나가 아니라 문서 전체(수십 쪽)가 저장된다.
         본문에서 조문을 체크해도 저장 창의 목록은 전부 켜진 채로 열리기 때문이다.
+
+        리뉴얼 후 고시 저장 창은 그 판의 부칙(arSeq)을 켠 채 열린다.
+        끄지 않으면 PDF·그림에 부칙이 딸려 들어간다. 별표(bylSeq)도 같이 끈다.
+        본문 화면의 같은 이름 칸은 건드리지 않도록 바깥 팝업 안쪽만 본다.
         """
         adapter = config.LAW_SITE_ADAPTERS[version.source_kind]
         target_values = [
@@ -231,7 +242,15 @@ class LawSiteBrowser:
 
         found_count = self._page.evaluate(
             """
-            ({dialogSelector, checkboxName, targetValues}) => {
+            ({popupSelector, dialogSelector, checkboxName, targetValues}) => {
+              const popup = document.querySelector(popupSelector);
+              if (popup) {
+                // 부칙·별표는 조문 캡처에 필요 없다. 기본으로 켜진 것을 끈다.
+                popup.querySelectorAll(
+                  'input[name=arSeq], input[name=bylSeq]'
+                ).forEach(box => { box.checked = false; });
+              }
+
               const boxes = Array.from(
                 document.querySelectorAll(
                   `${dialogSelector} input[name=${checkboxName}]`
@@ -250,6 +269,7 @@ class LawSiteBrowser:
             }
             """,
             {
+                "popupSelector": adapter["save_popup_selector"],
                 "dialogSelector": adapter["save_dialog_selector"],
                 "checkboxName": config.SAVE_DIALOG_ARTICLE_CHECKBOX_NAME,
                 "targetValues": target_values,
@@ -264,8 +284,16 @@ class LawSiteBrowser:
             )
 
     def _choose_pdf_format(self, version: LawVersion) -> None:
+        """
+        저장 창에서 파일 형식을 PDF 로 고른다.
+
+        바깥 팝업 안쪽으로 범위를 좁힌다. 화면 다른 곳의 같은 이름 단추를
+        누르지 않기 위함이다 (전체저장 등).
+        """
         adapter = config.LAW_SITE_ADAPTERS[version.source_kind]
-        self._page.check(adapter["pdf_radio_selector"])
+        self._page.check(
+            f"{adapter['save_popup_selector']} {adapter['pdf_radio_selector']}"
+        )
 
     def _click_save_and_wait_for_file(
         self, version: LawVersion, article_numbers: list[ArticleNumber]
@@ -306,10 +334,45 @@ class LawSiteBrowser:
 
         폼이 실제로 전송되면 화면이 PDF 로 넘어가 버려서 다음 조문을 처리할 수 없다.
         그래서 전송 직전에 붙잡아 두고, 주소와 값만 꺼내 온다.
+
+        저장 버튼은 바깥 팝업(save_popup_selector) 안에서 찾는다.
+        2026-11 리뉴얼로 버튼이 안쪽 칸(#…OutPutLayer) 밖 아래 단추 줄로
+        옮겨졌고, 숨은 3단비교 창에도 같은 이름 버튼이 있어 팝업으로 범위를
+        좁혀야 한다. 보이기 전에 누르면 실패하므로 보일 때까지 기다린다.
         """
         adapter = config.LAW_SITE_ADAPTERS[version.source_kind]
         save_button_selector = (
-            f"{adapter['save_dialog_selector']} {config.SAVE_BUTTON_SELECTOR}"
+            f"{adapter['save_popup_selector']} {config.SAVE_BUTTON_SELECTOR}"
+        )
+
+        try:
+            self._page.wait_for_selector(
+                save_button_selector,
+                state="visible",
+                timeout=config.PAGE_LOAD_TIMEOUT_IN_MILLISECONDS,
+            )
+        except PlaywrightTimeoutError as error:
+            raise LawSiteStructureChangedError("저장 창의 저장 버튼") from error
+
+        # 부칙·별표 칸이 조문 목록보다 늦게 채워지는 경우가 있다.
+        # 앞에서 꺼 두었어도 늦게 그려지며 다시 켜지므로, 저장 직전에 한 번 더 끈다.
+        self._page.evaluate(
+            """
+            (popupSelector) => {
+              const popup = document.querySelector(popupSelector);
+              if (!popup) return;
+              popup.querySelectorAll(
+                'input[name=arSeq], input[name=bylSeq]'
+              ).forEach(box => { box.checked = false; });
+              const appendixToggle = popup.querySelector('#arCheckBox');
+              if (appendixToggle) appendixToggle.checked = false;
+              const annexToggle = popup.querySelector('#bylCheckBox');
+              if (annexToggle) annexToggle.checked = false;
+              const arSeqsField = document.getElementById('arSeqs');
+              if (arSeqsField) arSeqsField.value = ',';
+            }
+            """,
+            adapter["save_popup_selector"],
         )
 
         self._page.evaluate(SAVE_REQUEST_INTERCEPTOR_SCRIPT)
